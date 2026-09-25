@@ -14,6 +14,7 @@ func UserFromServiceShallow(u *service.User) *User {
 		return nil
 	}
 	return &User{
+		SharedQuota:                u.SharedQuota,
 		ID:                         u.ID,
 		Email:                      u.Email,
 		Username:                   u.Username,
@@ -636,6 +637,8 @@ func RedeemCodeFromServiceAdmin(rc *service.RedeemCode) *AdminRedeemCode {
 	}
 	return &AdminRedeemCode{
 		RedeemCode: redeemCodeFromServiceBase(rc),
+		MaxUses:    max(1, rc.MaxUses),
+		UsedCount:  rc.UsedCount,
 		Notes:      rc.Notes,
 	}
 }

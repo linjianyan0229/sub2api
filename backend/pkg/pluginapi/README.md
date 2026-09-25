@@ -19,9 +19,9 @@
 
 独立进程是代码和发布边界，不是操作系统安全沙箱。插件拥有 Sub2API 服务用户所拥有的文件和网络权限，因此只应安装可信发布者的签名包。闭源二进制可提高源码分发门槛，但不能承诺无法反编译。
 
-## 初期能力边界
+## 能力边界
 
-当前只接受 `openai.oauth.outbound_transport.v1`：
+传输能力 `openai.oauth.outbound_transport.v1`：
 
 - 仅匹配 `platform=openai` 且 `account_type=oauth` 的上游 HTTP 请求。
 - API Key 账号、其他 provider、OAuth 登录与 Token 刷新流程不进入插件。
@@ -29,6 +29,10 @@
 - 命中插件的 OAuth WebSocket 账号会使用 Sub2API 现有 HTTP Bridge，不直接建立上游 WebSocket，避免绕过 v1 HTTP 插件协议。
 - Sub2API 继续负责响应状态处理、SSE 解析、错误映射、用量统计、计费和下游输出。
 - 灰度比例以账号 ID 稳定分桶，未命中的 OAuth 账号继续使用原有内置路径。
+
+计费能力 `billing.shared_daily_quota.v1`（`platform=all`、`account_type=all`）独立声明，不与传输能力混装。它使用既有配置和进程生命周期 RPC；扣费、账期与事务由宿主负责。该能力不授予上游账号或凭据访问权限，可与传输插件同时启用，且必须以 100% 覆盖全站普通用户。管理员维持个人策略。
+
+完整配置和运行语义见 [共享额度插件](../../../plugins/shared-daily-quota/README.md)。安装该插件前，宿主必须包含共享计费扩展及迁移 `241_shared_daily_quota.sql`。
 
 ## 宿主服务（HostService）
 

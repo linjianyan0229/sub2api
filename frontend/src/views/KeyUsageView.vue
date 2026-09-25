@@ -588,6 +588,10 @@ const statusInfo = computed(() => {
   const data = resultData.value
   if (!data) return null
 
+  if (data.mode === 'shared_quota') {
+    return { label: t('common.sharedQuota'), statusText: data.remaining > 0 ? 'Active' : 'Quota Exhausted', isActive: data.remaining > 0 }
+  }
+
   if (data.mode === 'quota_limited') {
     const isValid = data.isValid !== false
     const statusMap: Record<string, string> = {
@@ -615,10 +619,10 @@ const ringItems = computed<RingItem[]>(() => {
 
   const items: RingItem[] = []
 
-  if (data.mode === 'quota_limited') {
+  if (data.mode === 'quota_limited' || data.mode === 'shared_quota') {
     if (data.quota) {
       const pct = data.quota.limit > 0 ? Math.min(Math.round((data.quota.used / data.quota.limit) * 100), 100) : 0
-      items.push({ title: t('keyUsage.totalQuota'), pct, amount: `${usd(data.quota.used)} / ${usd(data.quota.limit)}`, iconType: 'dollar' })
+      items.push({ title: data.mode === 'shared_quota' ? t('common.dailyQuota') : t('keyUsage.totalQuota'), pct, amount: `${usd(data.quota.used)} / ${usd(data.quota.limit)}`, iconType: 'dollar', resetAt: data.shared_quota?.resets_at })
     }
     if (data.rate_limits) {
       const windowLabels: Record<string, string> = { '5h': t('keyUsage.limit5h'), '1d': t('keyUsage.limitDaily'), '7d': t('keyUsage.limit7d') }
@@ -689,7 +693,7 @@ const detailRows = computed<DetailRow[]>(() => {
   const ICON_DOLLAR = '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>'
   const ICON_CHECK = '<polyline points="20 6 9 17 4 12"/>'
 
-  if (data.mode === 'quota_limited') {
+  if (data.mode === 'quota_limited' || data.mode === 'shared_quota') {
     if (data.quota) {
       const remainColor = data.quota.remaining <= 0 ? 'text-rose-500'
         : data.quota.remaining < data.quota.limit * 0.1 ? 'text-amber-500'

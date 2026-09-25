@@ -472,14 +472,22 @@ func TestRollbackOAuthEmailAccountCreationRestoresInvitationUsage(t *testing.T) 
 		nil,
 	)
 
-	err := authService.RollbackOAuthEmailAccountCreation(context.Background(), 42, "INVITE123")
+	client := newInvitationTestClient(t)
+	authService.entClient = client
+	ctx := context.Background()
+	registeredUser := client.User.Create().SetEmail("rollback@example.com").SetPasswordHash("hash").SaveX(ctx)
+	registeredCode := client.RedeemCode.Create().SetCode("INVITE123").SetType(RedeemTypeInvitation).SetUsedCount(1).SetStatus(StatusUsed).SetUsedBy(registeredUser.ID).SetUsedAt(time.Now()).SaveX(ctx)
+	client.InvitationUsage.Create().SetRedeemCodeID(registeredCode.ID).SetUserID(registeredUser.ID).SetIP("192.0.2.42").SaveX(ctx)
+	err := authService.RollbackOAuthEmailAccountCreation(context.Background(), registeredUser.ID, "INVITE123")
 
 	require.NoError(t, err)
-	require.Equal(t, []int64{42}, userRepo.deletedIDs)
-	require.Len(t, redeemRepo.updateCalls, 1)
-	require.Equal(t, StatusUnused, redeemRepo.updateCalls[0].Status)
-	require.Nil(t, redeemRepo.updateCalls[0].UsedBy)
-	require.Nil(t, redeemRepo.updateCalls[0].UsedAt)
+	require.Equal(t, []int64{registeredUser.ID}, userRepo.deletedIDs)
+	restored := client.RedeemCode.GetX(ctx, registeredCode.ID)
+	require.Equal(t, StatusUnused, restored.Status)
+	require.Nil(t, restored.UsedBy)
+	require.Nil(t, restored.UsedAt)
+	require.Zero(t, restored.UsedCount)
+	require.Zero(t, client.InvitationUsage.Query().CountX(ctx))
 }
 
 func TestRollbackOAuthEmailAccountCreationPropagatesDeleteError(t *testing.T) {

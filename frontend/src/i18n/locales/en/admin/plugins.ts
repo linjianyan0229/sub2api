@@ -44,6 +44,7 @@ export default {
     confirmUntested: 'This plugin is compatible but has not declared the current Sub2API version as tested. Enable it anyway?',
     fileRequired: 'Select a .s2plugin file',
     bridgeRejected: 'Plugin UI message validation failed',
+    capabilities: 'Upstream transport and billing policies',
     onlyOpenAI: 'Initial capability: OpenAI OAuth outbound transport only',
     noAccountCoupling: 'The scope is platform and account type. Account records are not changed and no per-account toggle is required.'
   }

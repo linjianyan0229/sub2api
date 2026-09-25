@@ -5,16 +5,18 @@
 # It only packages the pre-built binary, no compilation needed.
 # =============================================================================
 
-ARG ALPINE_IMAGE=alpine:3.21
+ARG ALPINE_IMAGE=alpine:3.23
 ARG POSTGRES_IMAGE=postgres:18-alpine
 
 FROM ${POSTGRES_IMAGE} AS pg-client
 
 FROM ${ALPINE_IMAGE}
 
-LABEL maintainer="Wei-Shaw <github.com/Wei-Shaw>"
+ENV SUB2API_UPDATE_MODE=image
+
+LABEL maintainer="linjianyan0229 <github.com/linjianyan0229>"
 LABEL description="Sub2API - AI API Gateway Platform"
-LABEL org.opencontainers.image.source="https://github.com/Wei-Shaw/sub2api"
+LABEL org.opencontainers.image.source="https://github.com/linjianyan0229/sub2api"
 
 # Install runtime dependencies
 RUN apk add --no-cache \

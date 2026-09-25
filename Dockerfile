@@ -9,7 +9,7 @@
 
 ARG NODE_IMAGE=node:24-alpine
 ARG GOLANG_IMAGE=golang:1.27.0-alpine
-ARG ALPINE_IMAGE=alpine:3.21
+ARG ALPINE_IMAGE=alpine:3.23
 ARG POSTGRES_IMAGE=postgres:18-alpine
 ARG GOPROXY=https://goproxy.cn,direct
 ARG GOSUMDB=sum.golang.google.cn
@@ -92,7 +92,7 @@ RUN --mount=type=cache,id=sub2api-gomod,target=/go/pkg/mod \
     DATE_VALUE="${DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" && \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
     -tags embed \
-    -ldflags="-s -w -X main.Version=${VERSION_VALUE} -X main.Commit=${COMMIT} -X main.Date=${DATE_VALUE} -X main.BuildType=release" \
+    -ldflags="-s -w -X main.Version=${VERSION_VALUE} -X main.Commit=${COMMIT} -X main.Date=${DATE_VALUE} -X main.BuildType=container" \
     -trimpath \
     -o /app/sub2api \
     ./cmd/server
@@ -107,10 +107,12 @@ FROM ${POSTGRES_IMAGE} AS pg-client
 # -----------------------------------------------------------------------------
 FROM ${ALPINE_IMAGE}
 
+ENV SUB2API_UPDATE_MODE=image
+
 # Labels
-LABEL maintainer="Wei-Shaw <github.com/Wei-Shaw>"
+LABEL maintainer="linjianyan0229 <github.com/linjianyan0229>"
 LABEL description="Sub2API - AI API Gateway Platform"
-LABEL org.opencontainers.image.source="https://github.com/Wei-Shaw/sub2api"
+LABEL org.opencontainers.image.source="https://github.com/linjianyan0229/sub2api"
 
 # Install runtime dependencies
 RUN apk add --no-cache \

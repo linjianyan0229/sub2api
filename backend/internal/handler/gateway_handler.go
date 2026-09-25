@@ -1566,6 +1566,11 @@ func (h *GatewayHandler) Usage(c *gin.Context) {
 		}
 	}
 
+	if q := apiKey.User.SharedQuota; q != nil {
+		c.JSON(http.StatusOK, gin.H{"mode": "shared_quota", "type": "shared_quota", "unit": "USD", "remaining": q.Remaining, "balance": q.Remaining, "quota": gin.H{"limit": q.Total, "used": q.Used, "remaining": q.Remaining}, "shared_quota": q, "usage": usageData, "daily_usage": dailyUsage, "model_stats": modelStats})
+		return
+	}
+
 	// 判断模式: key 有总额度或速率限制 → quota_limited，否则 → unrestricted
 	isQuotaLimited := apiKey.Quota > 0 || apiKey.HasRateLimits()
 
@@ -2428,6 +2433,9 @@ func extractQuotaResetSeconds(err error) int {
 }
 
 func billingErrorDetails(err error) (status int, code, message string, retryAfter int) {
+	if errors.Is(err, service.ErrSharedQuotaExhausted) {
+		return http.StatusTooManyRequests, "shared_quota_exhausted", "全站每日共享额度已用完", 0
+	}
 	if errors.Is(err, service.ErrBillingServiceUnavailable) {
 		msg := pkgerrors.Message(err)
 		if msg == "" {

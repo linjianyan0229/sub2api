@@ -211,7 +211,7 @@
               </p>
             </div>
 
-            <div class="md:col-span-2">
+            <div v-if="!plugin.manifest.capabilities.some(capability => capability.id === 'billing.shared_daily_quota.v1')" class="md:col-span-2">
               <label
                 class="flex items-center justify-between gap-4 text-xs font-medium text-gray-600 dark:text-gray-300"
               >

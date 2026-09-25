@@ -1,5 +1,9 @@
 export default {
   common: {
+    sharedQuota: '全站共享额度',
+    dailyQuota: '每日额度',
+    usedQuota: '已用额度',
+    quotaResetsAt: '刷新时间',
     loading: '加载中...',
     submitting: '提交中...',
     justNow: '刚刚',
@@ -161,8 +165,19 @@ export default {
     }
   },
 
+  leaderboard: {
+    allTime: '累计使用量',
+    rank: '排名',
+    nickname: '昵称',
+    amount: '使用金额',
+    tokens: 'Token 数量',
+    anonymous: '未设置昵称',
+    loadFailed: '排行榜加载失败，请重试'
+  },
+
   // Navigation
   nav: {
+    leaderboard: '排行榜',
     dashboard: '仪表盘',
     announcements: '公告',
     apiKeys: 'API 密钥',
@@ -299,7 +314,7 @@ export default {
     invitationCodePlaceholder: '请输入邀请码',
     invitationCodeRequired: '请输入邀请码',
     invitationCodeValid: '邀请码有效',
-    invitationCodeInvalid: '邀请码无效或已被使用',
+    invitationCodeInvalid: '邀请码无效、已满额或已过期',
     invitationCodeValidating: '正在验证邀请码...',
     invitationCodeInvalidCannotRegister: '邀请码无效，请检查后重试',
     oauthOrContinue: '或使用其他继续',

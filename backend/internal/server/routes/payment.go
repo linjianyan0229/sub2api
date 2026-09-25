@@ -21,6 +21,7 @@ func RegisterPaymentRoutes(
 	auditLog middleware.AuditLogMiddleware,
 	settingService *service.SettingService,
 	panelRateLimiter *middleware.PanelRateLimiter,
+	personalBillingGuards ...gin.HandlerFunc,
 ) {
 	// --- User-facing payment endpoints (authenticated) ---
 	authenticated := v1.Group("/payment")
@@ -36,7 +37,7 @@ func RegisterPaymentRoutes(
 
 		orders := authenticated.Group("/orders")
 		{
-			orders.POST("", paymentHandler.CreateOrder)
+			orders.POST("", append(personalBillingGuards, paymentHandler.CreateOrder)...)
 			orders.POST("/verify", paymentHandler.VerifyOrder)
 			orders.GET("/my", paymentHandler.GetMyOrders)
 			orders.GET("/:id", paymentHandler.GetOrder)
@@ -72,7 +73,6 @@ func RegisterPaymentRoutes(
 	adminGroup := v1.Group("/admin/payment")
 	adminGroup.Use(gin.HandlerFunc(adminAuth))
 	adminGroup.Use(gin.HandlerFunc(auditLog))
-	adminGroup.Use(middleware.AdminComplianceGuard(settingService))
 	{
 		// Dashboard
 		adminGroup.GET("/dashboard", adminPaymentHandler.GetDashboard)

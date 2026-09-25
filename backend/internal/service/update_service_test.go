@@ -11,6 +11,36 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestUpdateServiceContainerUsesImageDeployment(t *testing.T) {
+	for _, mode := range []string{"build", "environment"} {
+		t.Run(mode, func(t *testing.T) {
+			buildType := "container"
+			t.Setenv("SUB2API_UPDATE_MODE", "")
+			if mode == "environment" {
+				buildType = "release"
+				t.Setenv("SUB2API_UPDATE_MODE", "image")
+			}
+			// nil 依赖确保镜像模式不会读取上游缓存、查询 GitHub 或下载文件。
+			svc := NewUpdateService(nil, nil, "0.2.8-custom.1", buildType)
+			for _, force := range []bool{false, true} {
+				info, err := svc.CheckUpdate(context.Background(), force)
+				require.NoError(t, err)
+				require.Equal(t, "container", info.BuildType)
+				require.Equal(t, "0.2.8-custom.1", info.CurrentVersion)
+				require.Empty(t, info.LatestVersion)
+				require.False(t, info.HasUpdate)
+				require.Nil(t, info.ReleaseInfo)
+			}
+			require.ErrorIs(t, svc.PerformUpdate(context.Background()), ErrContainerImageUpdate)
+			require.ErrorIs(t, svc.Rollback(), ErrContainerImageUpdate)
+			require.ErrorIs(t, svc.RollbackToVersion(context.Background(), "0.2.7"), ErrContainerImageUpdate)
+			versions, err := svc.ListRollbackVersions(context.Background())
+			require.NoError(t, err)
+			require.Empty(t, versions)
+		})
+	}
+}
+
 type updateServiceCacheStub struct {
 	data string
 }

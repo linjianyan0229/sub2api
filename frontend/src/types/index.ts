@@ -63,7 +63,18 @@ export interface UserProfileSourceContext {
   provider_label?: string | null
 }
 
+export interface SharedQuota {
+  window_id: number
+  total: number
+  used: number
+  held: number
+  remaining: number
+  resets_at: string
+  timezone: string
+}
+
 export interface User {
+  shared_quota?: SharedQuota
   id: number
   username: string
   email: string
@@ -1858,6 +1869,8 @@ export interface UsageCleanupTask {
 }
 
 export interface RedeemCode {
+  max_uses?: number
+  used_count?: number
   id: number
   code: string
   type: RedeemCodeType
@@ -1875,7 +1888,17 @@ export interface RedeemCode {
   group?: Group // 关联的分组
 }
 
+export interface InvitationUsage {
+  id: number
+  user_id: number
+  username: string
+  email: string
+  ip: string | null
+  created_at: string
+}
+
 export interface GenerateRedeemCodesRequest {
+  max_uses?: number
   count: number
   type: RedeemCodeType
   value: number

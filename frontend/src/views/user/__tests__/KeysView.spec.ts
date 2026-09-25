@@ -58,6 +58,9 @@ const messages: Record<string, string> = {
   'keys.usage': 'Usage',
 }
 
+const authState = vi.hoisted(() => ({ isSharedQuota: false }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => authState }))
+
 vi.mock('@/api', () => ({
   keysAPI: {
     list: listKeys,
@@ -267,6 +270,7 @@ const getButtonByText = (wrapper: VueWrapper, text: string) => {
 
 describe('user KeysView column settings', () => {
   beforeEach(() => {
+    authState.isSharedQuota = false
     localStorage.clear()
 
     listKeys.mockReset()
@@ -294,6 +298,23 @@ describe('user KeysView column settings', () => {
     getAvailableGroups.mockResolvedValue([])
     getUserGroupRates.mockResolvedValue({})
     isCurrentStep.mockReturnValue(false)
+  })
+
+  it('共享模式编辑 Key 不展示或提交个人金额字段', async () => {
+    authState.isSharedQuota = true
+    getAvailableGroups.mockResolvedValue([{ id: 1, name: 'shared', platform: 'openai' }])
+    listKeys.mockResolvedValue({ items: [{ ...createApiKey(), group_id: 1 }], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = await mountView()
+    await getButtonByText(wrapper, 'common.edit').trigger('click')
+    expect(wrapper.text()).not.toContain('keys.rateLimitSection')
+    expect(wrapper.find('button[title="keys.resetQuotaUsed"]').exists()).toBe(false)
+    await wrapper.get('[data-tour="key-form-name"]').setValue('Shared key')
+    await wrapper.get('#key-form').trigger('submit')
+    await flushPromises()
+    expect(updateKey).toHaveBeenCalled()
+    const changes = updateKey.mock.calls[0][1]
+    expect(changes).not.toHaveProperty('quota')
+    expect(changes).not.toHaveProperty('rate_limit_5h')
   })
 
   it.each([

@@ -6,6 +6,7 @@
 import { apiClient } from '../client'
 import type {
   RedeemCode,
+  InvitationUsage,
   GenerateRedeemCodesRequest,
   BatchUpdateRedeemCodeFields,
   RedeemCodeType,
@@ -70,13 +71,16 @@ export async function generate(
   value: number,
   groupId?: number | null,
   validityDays?: number,
-  expiresInDays?: number | null
+  expiresInDays?: number | null,
+  maxUses?: number
 ): Promise<RedeemCode[]> {
   const payload: GenerateRedeemCodesRequest = {
     count,
     type,
     value
   }
+
+  if (type === 'invitation') payload.max_uses = maxUses ?? 1
 
   // 订阅类型专用字段
   if (type === 'subscription') {
@@ -191,7 +195,19 @@ export async function exportCodes(filters?: {
   return response.data
 }
 
+export async function updateInvitationLimit(id: number, maxUses: number): Promise<RedeemCode> {
+  const { data } = await apiClient.put<RedeemCode>(`/admin/redeem-codes/${id}/invitation-limit`, { max_uses: maxUses })
+  return data
+}
+
+export async function listInvitationUsages(id: number, page = 1, pageSize = 10): Promise<PaginatedResponse<InvitationUsage>> {
+  const { data } = await apiClient.get<PaginatedResponse<InvitationUsage>>(`/admin/redeem-codes/${id}/invitation-usages`, { params: { page, page_size: pageSize } })
+  return data
+}
+
 export const redeemAPI = {
+  updateInvitationLimit,
+  listInvitationUsages,
   list,
   getById,
   generate,

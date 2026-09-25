@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>每日共享额度</title><link rel="stylesheet" href="style.css"></head>
+<body><main><form id="config-form">
+<label for="daily-quota">全站每日共享额度（USD）</label>
+<input id="daily-quota" type="number" min="0" max="10000000000" step="0.00000001" required inputmode="decimal" disabled>
+<label for="reset-time">全站每日共享额度刷新时间</label>
+<input id="reset-time" type="time" required disabled>
+<button id="save" type="button" disabled>保存</button>
+<p id="status" role="status" aria-live="polite"></p>
+</form></main><script src="app.js"></script></body></html>

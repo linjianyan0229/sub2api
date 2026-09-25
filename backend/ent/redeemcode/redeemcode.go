@@ -36,6 +36,10 @@ const (
 	FieldGroupID = "group_id"
 	// FieldValidityDays holds the string denoting the validity_days field in the database.
 	FieldValidityDays = "validity_days"
+	// FieldMaxUses holds the string denoting the max_uses field in the database.
+	FieldMaxUses = "max_uses"
+	// FieldUsedCount holds the string denoting the used_count field in the database.
+	FieldUsedCount = "used_count"
 	// EdgeUser holds the string denoting the user edge name in mutations.
 	EdgeUser = "user"
 	// EdgeGroup holds the string denoting the group edge name in mutations.
@@ -72,6 +76,8 @@ var Columns = []string{
 	FieldExpiresAt,
 	FieldGroupID,
 	FieldValidityDays,
+	FieldMaxUses,
+	FieldUsedCount,
 }
 
 // ValidColumn reports if the column name is valid (part of the table columns).
@@ -101,6 +107,14 @@ var (
 	DefaultCreatedAt func() time.Time
 	// DefaultValidityDays holds the default value on creation for the "validity_days" field.
 	DefaultValidityDays int
+	// DefaultMaxUses holds the default value on creation for the "max_uses" field.
+	DefaultMaxUses int
+	// MaxUsesValidator is a validator for the "max_uses" field. It is called by the builders before save.
+	MaxUsesValidator func(int) error
+	// DefaultUsedCount holds the default value on creation for the "used_count" field.
+	DefaultUsedCount int
+	// UsedCountValidator is a validator for the "used_count" field. It is called by the builders before save.
+	UsedCountValidator func(int) error
 )
 
 // OrderOption defines the ordering options for the RedeemCode queries.
@@ -164,6 +178,16 @@ func ByGroupID(opts ...sql.OrderTermOption) OrderOption {
 // ByValidityDays orders the results by the validity_days field.
 func ByValidityDays(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldValidityDays, opts...).ToFunc()
+}
+
+// ByMaxUses orders the results by the max_uses field.
+func ByMaxUses(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldMaxUses, opts...).ToFunc()
+}
+
+// ByUsedCount orders the results by the used_count field.
+func ByUsedCount(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUsedCount, opts...).ToFunc()
 }
 
 // ByUserField orders the results by user field.

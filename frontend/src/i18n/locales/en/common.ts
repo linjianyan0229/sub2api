@@ -1,5 +1,9 @@
 export default {
   common: {
+    sharedQuota: 'Shared site quota',
+    dailyQuota: 'Daily quota',
+    usedQuota: 'Used quota',
+    quotaResetsAt: 'Resets at',
     loading: 'Loading...',
     submitting: 'Submitting...',
     justNow: 'just now',
@@ -161,8 +165,19 @@ export default {
     }
   },
 
+  leaderboard: {
+    allTime: 'All-time usage',
+    rank: 'Rank',
+    nickname: 'Nickname',
+    amount: 'Amount used',
+    tokens: 'Tokens',
+    anonymous: 'Unnamed user',
+    loadFailed: 'Unable to load leaderboard. Please try again.'
+  },
+
   // Navigation
   nav: {
+    leaderboard: 'Leaderboard',
     dashboard: 'Dashboard',
     announcements: 'Announcements',
     apiKeys: 'API Keys',
@@ -300,7 +315,7 @@ export default {
     invitationCodePlaceholder: 'Enter invitation code',
     invitationCodeRequired: 'Invitation code is required',
     invitationCodeValid: 'Invitation code is valid',
-    invitationCodeInvalid: 'Invalid or used invitation code',
+    invitationCodeInvalid: 'Invalid, full or expired invitation code',
     invitationCodeValidating: 'Validating invitation code...',
     invitationCodeInvalidCannotRegister: 'Invalid invitation code. Please check and try again',
     oauthOrContinue: 'or continue with others',

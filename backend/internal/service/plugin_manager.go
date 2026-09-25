@@ -275,6 +275,9 @@ func (m *PluginManager) reconcileOnce(ctx context.Context) error {
 		return fmt.Errorf("读取插件启用状态: %w", err)
 	}
 	m.cleanupStaleLocalInstallations(installations)
+	if err := m.reconcileSharedQuota(ctx, installations); err != nil {
+		slog.Warn("shared_quota_plugin_reconcile_failed", "error", err)
+	}
 	var enabled *PluginInstallation
 	for _, installation := range installations {
 		if !hasEnabledOpenAIBinding(installation.Bindings) {
@@ -370,6 +373,9 @@ func (m *PluginManager) reconcileOnce(ctx context.Context) error {
 	m.mu.Lock()
 	stale := make([]*pluginRuntime, 0, len(m.runtimes))
 	for id, candidate := range m.runtimes {
+		if isSharedQuotaPlugin(candidate.installation) {
+			continue
+		}
 		if candidate != runtime {
 			candidate.draining.Store(true)
 			stale = append(stale, candidate)
@@ -407,6 +413,9 @@ func (m *PluginManager) detachAllRuntimes() []*pluginRuntime {
 	defer m.mu.Unlock()
 	runtimes := make([]*pluginRuntime, 0, len(m.runtimes))
 	for id, runtime := range m.runtimes {
+		if isSharedQuotaPlugin(runtime.installation) {
+			continue
+		}
 		runtime.draining.Store(true)
 		runtimes = append(runtimes, runtime)
 		delete(m.runtimes, id)
@@ -419,6 +428,9 @@ func (m *PluginManager) publishUnavailableRoute(pluginID int64, rollout int, mes
 	m.mu.Lock()
 	stale := make([]*pluginRuntime, 0, len(m.runtimes))
 	for id, runtime := range m.runtimes {
+		if isSharedQuotaPlugin(runtime.installation) {
+			continue
+		}
 		runtime.draining.Store(true)
 		stale = append(stale, runtime)
 		delete(m.runtimes, id)
@@ -564,10 +576,10 @@ func (m *PluginManager) Enable(ctx context.Context, id int64, acceptUntested boo
 	if err != nil {
 		return nil, err
 	}
-	if active := m.route.Load(); active != nil && active.pluginID != id {
+	if active := m.route.Load(); !isSharedQuotaPlugin(installation) && active != nil && active.pluginID != id {
 		return nil, errors.New("OpenAI OAuth 出站能力已有启用插件，请先停用当前插件")
 	}
-	if installation.State == PluginStateEnabled && hasEnabledOpenAIBinding(installation.Bindings) {
+	if installation.State == PluginStateEnabled && (hasEnabledOpenAIBinding(installation.Bindings) || hasEnabledSharedQuotaBinding(installation.Bindings)) {
 		installation.Compatibility = EvaluatePluginCompatibility(installation.Manifest, m.hostInfo)
 		m.mu.Lock()
 		runtime := m.runtimes[id]
@@ -588,6 +600,18 @@ func (m *PluginManager) Enable(ctx context.Context, id int64, acceptUntested boo
 	installation, err = m.ensureLocalInstallation(ctx, installation)
 	if err != nil {
 		return nil, err
+	}
+	if isSharedQuotaPlugin(installation) {
+		if rolloutPercent != 100 {
+			return nil, errors.New("共享额度插件必须全站启用")
+		}
+		raw, err := m.decryptConfig(installation)
+		if err != nil {
+			return nil, err
+		}
+		if err := m.validateSharedQuotaConfig(installation, raw); err != nil {
+			return nil, err
+		}
 	}
 	originalBindings := append([]PluginBinding(nil), installation.Bindings...)
 	for index := range installation.Bindings {
@@ -664,7 +688,7 @@ func (m *PluginManager) Delete(ctx context.Context, id int64) error {
 		m.mu.Unlock()
 		return err
 	}
-	if installation.State == PluginStateEnabled || hasEnabledOpenAIBinding(installation.Bindings) {
+	if installation.State == PluginStateEnabled || hasEnabledOpenAIBinding(installation.Bindings) || hasEnabledSharedQuotaBinding(installation.Bindings) {
 		m.mu.Unlock()
 		return errors.New("请先停用插件，再执行卸载")
 	}
@@ -718,6 +742,9 @@ func (m *PluginManager) SaveConfig(ctx context.Context, id int64, raw json.RawMe
 	if _, ok := normalized.(map[string]any); !ok {
 		return nil, errors.New("插件配置 JSON 根节点必须是对象")
 	}
+	if err := m.validateSharedQuotaConfig(installation, raw); err != nil {
+		return nil, err
+	}
 	canonical, err := json.Marshal(normalized)
 	if err != nil {
 		return nil, err
@@ -745,6 +772,12 @@ func (m *PluginManager) SaveConfig(ctx context.Context, id int64, raw json.RawMe
 		if err != nil {
 			return nil, err
 		}
+	}
+	if err := m.validateSharedQuotaConfig(installation, canonical); err != nil {
+		if !temporary {
+			err = errors.Join(err, m.restoreRuntimeConfig(id, runtime, previousConfig))
+		}
+		return nil, err
 	}
 	encrypted, err := m.encryptor.Encrypt(string(canonical))
 	if err != nil {
@@ -1031,6 +1064,9 @@ func (m *PluginManager) publishRuntimeLocked(installation *PluginInstallation, r
 		old.kill()
 	}
 	m.runtimes[installation.ID] = runtime
+	if isSharedQuotaPlugin(installation) {
+		return
+	}
 	m.route.Store(&pluginRoute{
 		pluginID:       installation.ID,
 		runtime:        runtime,

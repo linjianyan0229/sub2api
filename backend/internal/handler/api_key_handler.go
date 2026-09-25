@@ -142,7 +142,7 @@ func (h *APIKeyHandler) List(c *gin.Context) {
 
 	out := make([]dto.APIKey, 0, len(keys))
 	for i := range keys {
-		out = append(out, *dto.APIKeyFromService(&keys[i]))
+		out = append(out, *apiKeyForResponse(c.Request.Context(), &keys[i]))
 	}
 	response.Paginated(c, out, result.Total, page, pageSize)
 }
@@ -174,7 +174,7 @@ func (h *APIKeyHandler) GetByID(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.APIKeyFromService(key))
+	response.Success(c, apiKeyForResponse(c.Request.Context(), key))
 }
 
 // Create handles creating a new API key
@@ -222,7 +222,7 @@ func (h *APIKeyHandler) Create(c *gin.Context) {
 		if err != nil {
 			return nil, err
 		}
-		return dto.APIKeyFromService(key), nil
+		return apiKeyForResponse(c.Request.Context(), key), nil
 	})
 }
 
@@ -290,7 +290,7 @@ func (h *APIKeyHandler) Update(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.APIKeyFromService(key))
+	response.Success(c, apiKeyForResponse(c.Request.Context(), key))
 }
 
 // Delete handles deleting an API key
@@ -355,4 +355,49 @@ func (h *APIKeyHandler) GetUserGroupRates(c *gin.Context) {
 	}
 
 	response.Success(c, rates)
+}
+
+func (h *APIKeyHandler) SharedQuotaView() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		subject, ok := middleware2.GetAuthSubjectFromContext(c)
+		if !ok {
+			response.Unauthorized(c, "User not authenticated")
+			c.Abort()
+			return
+		}
+		quota, err := h.apiKeyService.SharedQuotaForUser(c.Request.Context(), subject.UserID)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			c.Abort()
+			return
+		}
+		if quota != nil {
+			c.Request = c.Request.WithContext(service.WithSharedQuota(c.Request.Context(), quota))
+		}
+		c.Next()
+	}
+}
+
+func apiKeyForResponse(ctx context.Context, key *service.APIKey) *dto.APIKey {
+	view := dto.APIKeyFromService(key)
+	quota := service.SharedQuotaFromContext(ctx)
+	if view == nil || quota == nil {
+		return view
+	}
+	view.SharedQuota = quota
+	view.Quota, view.QuotaUsed = quota.Total, quota.Used
+	view.RateLimit5h, view.RateLimit1d, view.RateLimit7d = 0, 0, 0
+	view.Usage5h, view.Usage1d, view.Usage7d = 0, 0, 0
+	view.Window5hStart, view.Window1dStart, view.Window7dStart = nil, nil, nil
+	view.Reset5hAt, view.Reset1dAt, view.Reset7dAt = nil, nil, nil
+	if view.User != nil {
+		view.User.Balance = quota.Remaining
+		view.User.FrozenBalance = quota.Held
+		view.User.SharedQuota = quota
+		view.User.Subscriptions = nil
+	}
+	if view.Status == service.StatusAPIKeyQuotaExhausted {
+		view.Status = service.StatusActive
+	}
+	return view
 }

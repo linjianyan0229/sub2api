@@ -71,6 +71,7 @@ func ProvideAuthService(
 	defaultSubAssigner DefaultSubscriptionAssigner,
 	affiliateService *AffiliateService,
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
+	sharedQuota *SharedQuotaService,
 ) *AuthService {
 	svc := NewAuthService(
 		entClient,
@@ -87,6 +88,7 @@ func ProvideAuthService(
 		affiliateService,
 		userPlatformQuotaRepo,
 	)
+	svc.sharedQuota = sharedQuota
 	svc.SetTencentCaptchaService(tencentCaptchaService)
 	svc.SetAliyunCaptchaService(aliyunCaptchaService)
 	return svc
@@ -825,8 +827,11 @@ func ProvideBillingCacheService(
 	rateRepo UserGroupRateRepository,
 	cfg *config.Config,
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
+	sharedQuota *SharedQuotaService,
 ) *BillingCacheService {
-	return NewBillingCacheService(cache, userRepo, subRepo, apiKeyRepo, rpmCache, rateRepo, cfg, userPlatformQuotaRepo)
+	svc := NewBillingCacheService(cache, userRepo, subRepo, apiKeyRepo, rpmCache, rateRepo, cfg, userPlatformQuotaRepo)
+	svc.sharedQuota = sharedQuota
+	return svc
 }
 
 // ProvideAPIKeyService wires APIKeyService and connects rate-limit cache invalidation.
@@ -840,10 +845,18 @@ func ProvideAPIKeyService(
 	cfg *config.Config,
 	billingCacheService *BillingCacheService,
 	concurrencyService *ConcurrencyService,
+	sharedQuota *SharedQuotaService,
 ) *APIKeyService {
 	svc := NewAPIKeyService(apiKeyRepo, userRepo, groupRepo, userSubRepo, userGroupRateRepo, cache, cfg)
 	svc.SetRateLimitCacheInvalidator(billingCacheService)
 	svc.SetConcurrencyService(concurrencyService)
+	svc.sharedQuota = sharedQuota
+	return svc
+}
+
+func ProvideUserService(userRepo UserRepository, settingRepo SettingRepository, invalidator APIKeyAuthCacheInvalidator, cache BillingCache, sharedQuota *SharedQuotaService) *UserService {
+	svc := NewUserService(userRepo, settingRepo, invalidator, cache)
+	svc.sharedQuota = sharedQuota
 	return svc
 }
 
@@ -852,7 +865,8 @@ var ProviderSet = wire.NewSet(
 	// Core services
 	ProvideAuthService,
 	NewPasskeyService,
-	NewUserService,
+	ProvideUserService,
+	NewSharedQuotaService,
 	ProvideAPIKeyService,
 	ProvideAPIKeyAuthCacheInvalidator,
 	ProvideAuthCacheInvalidationWorker,

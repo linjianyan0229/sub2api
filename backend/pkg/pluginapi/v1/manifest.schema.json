@@ -32,10 +32,14 @@
         "type": "object",
         "additionalProperties": false,
         "required": ["id", "platform", "account_type"],
+        "oneOf": [
+          { "properties": { "id": { "const": "openai.oauth.outbound_transport.v1" }, "platform": { "const": "openai" }, "account_type": { "const": "oauth" } } },
+          { "properties": { "id": { "const": "billing.shared_daily_quota.v1" }, "platform": { "const": "all" }, "account_type": { "const": "all" } } }
+        ],
         "properties": {
-          "id": { "const": "openai.oauth.outbound_transport.v1" },
-          "platform": { "const": "openai" },
-          "account_type": { "const": "oauth" }
+          "id": { "enum": ["openai.oauth.outbound_transport.v1", "billing.shared_daily_quota.v1"] },
+          "platform": { "enum": ["openai", "all"] },
+          "account_type": { "enum": ["oauth", "all"] }
         }
       }
     },

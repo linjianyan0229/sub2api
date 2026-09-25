@@ -92,7 +92,7 @@ type postUsageBillingParams struct {
 var ErrSimpleModeKeyRateLimitBillingUnavailable = errors.New("simple mode api key rate-limit billing unavailable")
 
 func simpleModeKeyRateLimitBillingEnabled(cfg *config.Config, apiKey *APIKey) bool {
-	return cfg != nil && cfg.RunMode == config.RunModeSimple && cfg.SimpleModeKeyRateLimitEnabled && apiKey != nil && apiKey.HasRateLimits()
+	return cfg != nil && cfg.RunMode == config.RunModeSimple && cfg.SimpleModeKeyRateLimitEnabled && apiKey != nil && (apiKey.User == nil || apiKey.User.SharedQuota == nil) && apiKey.HasRateLimits()
 }
 
 // PlatformFromAPIKey 从 APIKey 关联的 Group 推导 platform 名称。
@@ -317,6 +317,21 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		}
 	}
 
+	if p.User.SharedQuota != nil && !p.User.IsAdmin() {
+		cmd.SharedQuotaWindowID = p.User.SharedQuota.WindowID
+		cmd.SharedQuotaCost = p.Cost.ActualCost
+		cmd.BillingType = BillingTypeSharedQuota
+		cmd.SubscriptionID = nil
+		if usageLog != nil {
+			usageLog.SubscriptionID = nil
+			usageLog.BillingType = BillingTypeSharedQuota
+		}
+		if p.shouldUpdateAccountQuota() {
+			cmd.AccountQuotaCost = p.Cost.TotalCost * p.AccountRateMultiplier
+		}
+		cmd.Normalize()
+		return cmd
+	}
 	if p.SimpleModeKeyRateLimitOnly {
 		if p.Cost.ActualCost > 0 && p.APIKey.HasRateLimits() {
 			cmd.APIKeyRateLimitCost = p.Cost.ActualCost
@@ -357,7 +372,7 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 
 	cmd := buildUsageBillingCommand(requestID, usageLog, p)
 	if cmd == nil || cmd.RequestID == "" || repo == nil {
-		if p.SimpleModeKeyRateLimitOnly {
+		if p.SimpleModeKeyRateLimitOnly || (p.User != nil && p.User.SharedQuota != nil) {
 			return false, ErrSimpleModeKeyRateLimitBillingUnavailable
 		}
 		// The legacy path is only a fallback for standard billing. Simple mode
@@ -394,6 +409,11 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 		return
 	}
 
+	if p.User != nil && p.User.SharedQuota != nil && !p.User.IsAdmin() {
+		deps.deferredService.ScheduleLastUsedUpdate(p.Account.ID)
+		go notifyAccountQuota(p, deps, result)
+		return
+	}
 	if p.SimpleModeKeyRateLimitOnly {
 		// Simple-mode key windows are DB-authoritative during preflight. Clear
 		// any Redis snapshot after the committed increment as a best-effort aid
@@ -874,7 +894,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	}
 
 	simpleModeKeyRateLimitOnly := simpleModeKeyRateLimitBillingEnabled(s.cfg, apiKey)
-	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !simpleModeKeyRateLimitOnly {
+	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !simpleModeKeyRateLimitOnly && (apiKey.User == nil || apiKey.User.SharedQuota == nil) {
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")
 		logger.LegacyPrintf("service.gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)

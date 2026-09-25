@@ -420,3 +420,20 @@ func TestGrokMediaVideoCompletionStillClaimsBillingOnce(t *testing.T) {
 	}
 	require.Len(t, bindings.billed, 1)
 }
+
+func TestGrokVideoCompletionKeepsCreateTimeSharedQuota(t *testing.T) {
+	h, _, _, _ := newGrokMediaSlotHandler(t, false, false)
+	c, _ := grokMediaSlotContext(context.Background(), false)
+	key, ok := middleware2.GetAPIKeyFromContext(c)
+	require.True(t, ok)
+	subject := middleware2.AuthSubject{UserID: 10, Concurrency: 5}
+	original := &service.SharedQuotaSnapshot{WindowID: 7, Total: 100, Remaining: 20}
+	require.NoError(t, h.gatewayService.StoreGrokVideoPendingBilling(c.Request.Context(), "task", subject.UserID, key.ID, service.GrokVideoPendingBilling{Model: "grok-imagine-video", BillingPolicyCaptured: true, SharedQuota: original}))
+	// 查询时插件已停用，仍恢复创建任务时的共享池。
+	key.User.SharedQuota = nil
+	bill := prepareGrokVideoCompletionBilling(c.Request.Context(), h, zap.NewNop(), key, subject, "task", &service.OpenAIForwardResult{ResponseID: "task", VideoCount: 1, VideoDurationSeconds: 6})
+	require.NotNil(t, bill)
+	require.True(t, bill.BillingPolicyCaptured)
+	require.Equal(t, int64(7), bill.SharedQuota.WindowID)
+	require.Nil(t, key.User.SharedQuota)
+}

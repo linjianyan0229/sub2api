@@ -52,6 +52,15 @@ func (h *UserHandler) GetMyPlatformQuotas(c *gin.Context) {
 		response.Unauthorized(c, "User not authenticated")
 		return
 	}
+	quota, err := h.userService.SharedQuotaForUser(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if quota != nil {
+		response.Success(c, map[string]any{"platform_quotas": []any{}, "shared_quota": quota})
+		return
+	}
 	if h.userPlatformQuotaRepo == nil {
 		response.Success(c, map[string]any{"platform_quotas": []any{}})
 		return
@@ -531,6 +540,11 @@ func (h *UserHandler) ToggleNotifyEmail(c *gin.Context) {
 }
 
 func (h *UserHandler) buildUserProfileResponse(ctx context.Context, userID int64, user *service.User) (userProfileResponse, error) {
+	if user != nil && user.SharedQuota == nil {
+		if err := h.userService.ApplySharedQuotaView(ctx, user); err != nil {
+			return userProfileResponse{}, err
+		}
+	}
 	identities, err := h.userService.GetProfileIdentitySummaries(ctx, userID, user)
 	if err != nil {
 		return userProfileResponse{}, err
@@ -635,5 +649,29 @@ func buildUserProfileSourceContext(provider string) *userProfileSourceContext {
 	return &userProfileSourceContext{
 		Provider: provider,
 		Source:   provider,
+	}
+}
+
+// 共享模式下关闭新增个人资金入口，已存在订单的回调和退款继续处理。
+func (h *UserHandler) SharedQuotaPersonalBillingGuard() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		subject, ok := middleware2.GetAuthSubjectFromContext(c)
+		if !ok {
+			response.Unauthorized(c, "User not authenticated")
+			c.Abort()
+			return
+		}
+		quota, err := h.userService.SharedQuotaForUser(c.Request.Context(), subject.UserID)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			c.Abort()
+			return
+		}
+		if quota != nil {
+			response.Forbidden(c, "当前使用全站共享额度")
+			c.Abort()
+			return
+		}
+		c.Next()
 	}
 }

@@ -553,6 +553,7 @@ type UpdateProxyInput struct {
 }
 
 type GenerateRedeemCodesInput struct {
+	MaxUses      int
 	Count        int
 	Type         string
 	Value        float64

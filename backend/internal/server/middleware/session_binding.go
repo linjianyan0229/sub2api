@@ -25,7 +25,8 @@ func SessionBindingContext(cfg *config.Config) gin.HandlerFunc {
 			IP:        ip.GetSecurityClientIP(c, forwardedIPSettings.TrustForwardedIP),
 			UserAgent: userAgent,
 		}
-		c.Request = c.Request.WithContext(service.WithSessionBinding(c.Request.Context(), binding))
+		ctx := service.WithRegistrationIP(c.Request.Context(), ip.GetTrustedClientIP(c))
+		c.Request = c.Request.WithContext(service.WithSessionBinding(ctx, binding))
 		c.Next()
 	}
 }

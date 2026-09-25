@@ -32,7 +32,7 @@ func RegisterUserRoutes(
 			user.PUT("/password", h.User.ChangePassword)
 			user.PUT("", h.User.UpdateProfile)
 			user.GET("/aff", h.User.GetAffiliate)
-			user.POST("/aff/transfer", h.User.TransferAffiliateQuota)
+			user.POST("/aff/transfer", h.User.SharedQuotaPersonalBillingGuard(), h.User.TransferAffiliateQuota)
 			user.POST("/account-bindings/email/send-code", h.User.SendEmailBindingCode)
 			user.POST("/account-bindings/email", h.User.BindEmailIdentity)
 			user.DELETE("/account-bindings/:provider", h.User.UnbindIdentity)
@@ -73,7 +73,7 @@ func RegisterUserRoutes(
 		}
 
 		// API Key管理
-		keys := authenticated.Group("/keys")
+		keys := authenticated.Group("/keys", h.APIKey.SharedQuotaView())
 		{
 			keys.GET("", h.APIKey.List)
 			keys.GET("/:id", h.APIKey.GetByID)
@@ -99,6 +99,7 @@ func RegisterUserRoutes(
 		usage := authenticated.Group("/usage")
 		usage.Use(panelRateLimiter.Heavy())
 		{
+			usage.GET("/leaderboard", h.Usage.Leaderboard)
 			usage.GET("", h.Usage.List)
 			usage.GET("/errors", h.Usage.ListErrors)
 			usage.GET("/errors/:id", h.Usage.GetErrorDetail)
@@ -122,12 +123,12 @@ func RegisterUserRoutes(
 		// 卡密兑换
 		redeem := authenticated.Group("/redeem")
 		{
-			redeem.POST("", h.Redeem.Redeem)
+			redeem.POST("", h.User.SharedQuotaPersonalBillingGuard(), h.Redeem.Redeem)
 			redeem.GET("/history", h.Redeem.GetHistory)
 		}
 
 		// 用户订阅
-		subscriptions := authenticated.Group("/subscriptions")
+		subscriptions := authenticated.Group("/subscriptions", h.User.SharedQuotaPersonalBillingGuard())
 		{
 			subscriptions.GET("", h.Subscription.List)
 			subscriptions.GET("/active", h.Subscription.GetActive)

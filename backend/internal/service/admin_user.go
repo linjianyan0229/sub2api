@@ -1253,6 +1253,9 @@ func (s *adminServiceImpl) GetRedeemCode(ctx context.Context, id int64) (*Redeem
 }
 
 func (s *adminServiceImpl) GenerateRedeemCodes(ctx context.Context, input *GenerateRedeemCodesInput) ([]RedeemCode, error) {
+	if input.MaxUses < 0 || input.MaxUses > 2147483647 {
+		return nil, ErrInvitationLimitInvalid
+	}
 	if input.ExpiresAt != nil && !input.ExpiresAt.After(time.Now()) {
 		return nil, ErrRedeemCodeExpired
 	}
@@ -1280,6 +1283,7 @@ func (s *adminServiceImpl) GenerateRedeemCodes(ctx context.Context, input *Gener
 		}
 		code := RedeemCode{
 			Code:      codeValue,
+			MaxUses:   max(1, input.MaxUses),
 			Type:      input.Type,
 			Value:     input.Value,
 			Status:    StatusUnused,

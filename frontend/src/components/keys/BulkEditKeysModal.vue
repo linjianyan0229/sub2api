@@ -48,7 +48,7 @@
           />
         </div>
 
-        <div v-for="field in limitFields" :key="field.key" class="space-y-2">
+        <div v-for="field in (authStore.isSharedQuota ? [] : limitFields)" :key="field.key" class="space-y-2">
           <label class="flex items-center gap-2 text-sm font-medium">
             <input
               v-model="enabled[field.key]"
@@ -149,6 +149,8 @@
 </template>
 
 <script setup lang="ts">
+import { useAuthStore } from '@/stores/auth'
+const authStore = useAuthStore()
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { keysAPI } from '@/api'
@@ -261,7 +263,7 @@ const submit = async () => {
   if (enabled.group_id) updates.group_id = groupId.value
   if (enabled.status) updates.status = status.value
   for (const { key } of limitFields) {
-    if (enabled[key]) updates[key] = Number(limits[key])
+    if (!authStore.isSharedQuota && enabled[key]) updates[key] = Number(limits[key])
   }
   for (const { key } of ipFields) {
     if (enabled[key]) updates[key] = ipLists[key].split('\n').map((ip) => ip.trim()).filter(Boolean)

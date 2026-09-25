@@ -1,0 +1,10 @@
+[Unit]
+Description=每 5 分钟检查 Sub2API CCR 镜像
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=5min
+Unit=sub2api-ccr-update.service
+
+[Install]
+WantedBy=timers.target

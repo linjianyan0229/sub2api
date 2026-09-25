@@ -44,6 +44,7 @@ export default {
     confirmUntested: '该插件兼容当前版本范围，但未声明已测试当前 Sub2API 版本。确定承担风险并启用吗？',
     fileRequired: '请选择 .s2plugin 文件',
     bridgeRejected: '插件 UI 消息校验失败',
+    capabilities: '上游传输与计费策略',
     onlyOpenAI: '初期能力：仅 OpenAI OAuth 出站传输',
     noAccountCoupling: '作用域为平台与账号类型，不修改账号数据，也不需要在账号页逐个开启。'
   }

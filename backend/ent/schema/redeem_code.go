@@ -18,8 +18,8 @@ import (
 //
 // 删除策略：硬删除
 // RedeemCode 使用硬删除而非软删除，原因如下：
-//   - 兑换码具有一次性使用特性，删除后无需保留历史记录
-//   - 已使用的兑换码通过 status 和 used_at 字段追踪，无需依赖软删除
+//   - 充值、订阅等兑换码通过 status 和 used_at 追踪一次性使用
+//   - 邀请码可按人数上限重复使用，独立的 invitation_usages 保留历史和 IP 占用
 //   - 减少数据库存储压力和查询复杂度
 //
 // 如需审计已删除的兑换码，建议在删除前将关键信息写入审计日志表。
@@ -72,6 +72,8 @@ func (RedeemCode) Fields() []ent.Field {
 			Nillable(),
 		field.Int("validity_days").
 			Default(30),
+		field.Int("max_uses").Default(1).Positive(),
+		field.Int("used_count").Default(0).NonNegative(),
 	}
 }
 

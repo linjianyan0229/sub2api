@@ -289,7 +289,7 @@ func (s *AuthService) FinalizeOAuthEmailAccount(
 	}
 	if invitationRedeemCode != nil {
 		if err := s.useOAuthRegistrationInvitation(ctx, invitationRedeemCode.ID, user.ID); err != nil {
-			return ErrInvitationCodeInvalid
+			return err
 		}
 	}
 
@@ -308,46 +308,25 @@ func (s *AuthService) RollbackOAuthEmailAccountCreation(ctx context.Context, use
 	if s == nil || s.userRepo == nil || userID <= 0 {
 		return ErrServiceUnavailable
 	}
-	if err := s.restoreOAuthRegistrationInvitation(ctx, invitationCode, userID); err != nil {
-		return err
+	if strings.TrimSpace(invitationCode) == "" {
+		if err := s.userRepo.Delete(ctx, userID); err != nil {
+			return fmt.Errorf("delete created oauth user: %w", err)
+		}
+		return nil
 	}
-	if err := s.userRepo.Delete(ctx, userID); err != nil {
-		return fmt.Errorf("delete created oauth user: %w", err)
-	}
-	return nil
+	return withInvitationTx(ctx, s.entClient, func(ctx context.Context, _ *dbent.Client) error {
+		if err := s.userRepo.Delete(ctx, userID); err != nil {
+			return fmt.Errorf("delete created oauth user: %w", err)
+		}
+		return s.restoreOAuthRegistrationInvitation(ctx, invitationCode, userID)
+	})
 }
 
 func (s *AuthService) restoreOAuthRegistrationInvitation(ctx context.Context, invitationCode string, userID int64) error {
-	if s == nil || s.settingService == nil || !s.settingService.IsInvitationCodeEnabled(ctx) {
+	if strings.TrimSpace(invitationCode) == "" || userID <= 0 {
 		return nil
 	}
-	if s.redeemRepo == nil && s.oauthEmailFlowClient(ctx) == nil {
-		return ErrServiceUnavailable
-	}
-
-	invitationCode = strings.TrimSpace(invitationCode)
-	if invitationCode == "" || userID <= 0 {
-		return nil
-	}
-
-	redeemCode, err := s.loadOAuthRegistrationInvitation(ctx, invitationCode)
-	if err != nil {
-		if errors.Is(err, ErrRedeemCodeNotFound) {
-			return nil
-		}
-		return fmt.Errorf("load invitation code: %w", err)
-	}
-	if redeemCode.Type != RedeemTypeInvitation || redeemCode.Status != StatusUsed || redeemCode.UsedBy == nil || *redeemCode.UsedBy != userID {
-		return nil
-	}
-
-	redeemCode.Status = StatusUnused
-	redeemCode.UsedBy = nil
-	redeemCode.UsedAt = nil
-	if err := s.updateOAuthRegistrationInvitation(ctx, redeemCode); err != nil {
-		return fmt.Errorf("restore invitation code: %w", err)
-	}
-	return nil
+	return releaseInvitation(ctx, s.entClient, invitationCode, userID)
 }
 
 func (s *AuthService) oauthEmailFlowClient(ctx context.Context) *dbent.Client {
@@ -382,70 +361,15 @@ func (s *AuthService) loadOAuthRegistrationInvitation(ctx context.Context, invit
 			ExpiresAt:    entity.ExpiresAt,
 			GroupID:      entity.GroupID,
 			ValidityDays: entity.ValidityDays,
+			MaxUses:      entity.MaxUses,
+			UsedCount:    entity.UsedCount,
 		}, nil
 	}
 	return s.redeemRepo.GetByCode(ctx, invitationCode)
 }
 
 func (s *AuthService) useOAuthRegistrationInvitation(ctx context.Context, invitationID, userID int64) error {
-	if client := s.oauthEmailFlowClient(ctx); client != nil {
-		affected, err := client.RedeemCode.Update().
-			Where(
-				redeemcode.IDEQ(invitationID),
-				redeemcode.StatusEQ(StatusUnused),
-				redeemcode.Or(redeemcode.ExpiresAtIsNil(), redeemcode.ExpiresAtGT(time.Now().UTC())),
-			).
-			SetStatus(StatusUsed).
-			SetUsedBy(userID).
-			SetUsedAt(time.Now().UTC()).
-			Save(ctx)
-		if err != nil {
-			return err
-		}
-		if affected == 0 {
-			return ErrRedeemCodeUsed
-		}
-		return nil
-	}
-	return s.redeemRepo.Use(ctx, invitationID, userID)
-}
-
-func (s *AuthService) updateOAuthRegistrationInvitation(ctx context.Context, code *RedeemCode) error {
-	if code == nil {
-		return nil
-	}
-	if client := s.oauthEmailFlowClient(ctx); client != nil {
-		update := client.RedeemCode.UpdateOneID(code.ID).
-			SetCode(code.Code).
-			SetType(code.Type).
-			SetValue(code.Value).
-			SetStatus(code.Status).
-			SetNotes(code.Notes).
-			SetValidityDays(code.ValidityDays)
-		if code.ExpiresAt != nil {
-			update = update.SetExpiresAt(*code.ExpiresAt)
-		} else {
-			update = update.ClearExpiresAt()
-		}
-		if code.UsedBy != nil {
-			update = update.SetUsedBy(*code.UsedBy)
-		} else {
-			update = update.ClearUsedBy()
-		}
-		if code.UsedAt != nil {
-			update = update.SetUsedAt(*code.UsedAt)
-		} else {
-			update = update.ClearUsedAt()
-		}
-		if code.GroupID != nil {
-			update = update.SetGroupID(*code.GroupID)
-		} else {
-			update = update.ClearGroupID()
-		}
-		_, err := update.Save(ctx)
-		return err
-	}
-	return s.redeemRepo.Update(ctx, code)
+	return claimInvitation(ctx, s.entClient, invitationID, userID)
 }
 
 func (s *AuthService) updateOAuthSignupSource(ctx context.Context, userID int64, signupSource string) {

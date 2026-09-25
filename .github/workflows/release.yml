@@ -34,6 +34,8 @@ env:
 
 jobs:
   prepare:
+    # 自有仓库使用 CCR 发布入口，打标签不会触发原上游的多平台发布。
+    if: github.repository == 'Wei-Shaw/sub2api' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.plan.outputs.sha }}

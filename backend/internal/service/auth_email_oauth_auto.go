@@ -190,7 +190,13 @@ func (s *AuthService) createEmailOAuthUser(ctx context.Context, email, username,
 		Status:       StatusActive,
 		SignupSource: providerType,
 	}
-	if err := s.userRepo.Create(ctx, user); err != nil {
+	createUser := s.userRepo.Create
+	if invitationRedeemCode != nil {
+		createUser = func(ctx context.Context, user *User) error {
+			return s.createUserAndClaimInvitation(ctx, user, invitationRedeemCode)
+		}
+	}
+	if err := createUser(ctx, user); err != nil {
 		if errors.Is(err, ErrEmailExists) {
 			existing, loadErr := s.userRepo.GetByEmail(ctx, email)
 			if loadErr != nil {
@@ -198,19 +204,13 @@ func (s *AuthService) createEmailOAuthUser(ctx context.Context, email, username,
 			}
 			return existing, nil
 		}
-		return nil, ErrServiceUnavailable
+		return nil, err
 	}
 	s.postAuthUserBootstrap(ctx, user, providerType, false)
 	s.assignSubscriptions(ctx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
 	// snapshot user × platform quota（fail-open）
 	_ = s.snapshotPlatformQuotaDefaults(ctx, user.ID, &grantPlan)
 	s.bindOAuthAffiliate(ctx, user.ID, affiliateCode)
-	if invitationRedeemCode != nil {
-		if err := s.useOAuthRegistrationInvitation(ctx, invitationRedeemCode.ID, user.ID); err != nil {
-			_ = s.RollbackOAuthEmailAccountCreation(ctx, user.ID, invitationCode)
-			return nil, ErrInvitationCodeInvalid
-		}
-	}
 	return user, nil
 }
 

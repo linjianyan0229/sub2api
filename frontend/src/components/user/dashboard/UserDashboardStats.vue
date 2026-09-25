@@ -1,8 +1,14 @@
 <template>
+
+  <div v-if="sharedQuota" class="card mb-4 flex flex-wrap gap-x-8 gap-y-2 p-4 text-sm">
+    <span>{{ t('common.dailyQuota') }}: ${{ sharedQuota.total.toFixed(2) }}</span>
+    <span>{{ t('common.usedQuota') }}: ${{ sharedQuota.used.toFixed(2) }}</span>
+    <span>{{ t('common.quotaResetsAt') }}: {{ new Date(sharedQuota.resets_at).toLocaleString() }}</span>
+  </div>
   <!-- Row 1: Core Stats -->
   <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
     <!-- Balance -->
-    <div v-if="!isSimple" class="card p-4">
+    <div v-if="!isSimple || sharedQuota" class="card p-4">
       <div class="flex items-center gap-3">
         <div class="rounded-lg bg-emerald-100 p-2 dark:bg-emerald-900/30">
           <svg class="h-5 w-5 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -10,7 +16,7 @@
           </svg>
         </div>
         <div>
-          <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.balance') }}</p>
+          <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t(sharedQuota ? 'common.sharedQuota' : 'dashboard.balance') }}</p>
           <p class="text-xl font-bold text-emerald-600 dark:text-emerald-400">${{ formatBalance(balance) }}</p>
           <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('common.available') }}</p>
         </div>
@@ -181,7 +187,7 @@
         </div>
 
         <!-- Quota 区：仅当 quota 配置存在、非 __other__ 且至少有一个窗口配了 limit 时显示 -->
-        <div v-if="hasAnyLimit(item.quota) && !item.isOther" class="mt-3 space-y-1.5 border-t border-gray-200 pt-2 dark:border-dark-700">
+        <div v-if="!sharedQuota && hasAnyLimit(item.quota) && !item.isOther" class="mt-3 space-y-1.5 border-t border-gray-200 pt-2 dark:border-dark-700">
           <p class="text-[10px] uppercase tracking-wide text-gray-400">
             {{ t('dashboard.platformQuota.title') }}
           </p>
@@ -229,7 +235,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { PlatformDashboardStats, UserDashboardStats as UserStatsType } from '@/api/usage'
-import type { PlatformQuotaItem } from '@/types'
+import type { PlatformQuotaItem, SharedQuota } from '@/types'
 
 interface FusedPlatformCard {
   platform: string
@@ -244,6 +250,7 @@ interface FusedPlatformCard {
 const props = defineProps<{
   stats: UserStatsType
   balance: number
+  sharedQuota?: SharedQuota
   isSimple: boolean
   platformQuotas?: PlatformQuotaItem[] | null
 }>()

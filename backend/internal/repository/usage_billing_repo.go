@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"math"
 	"strings"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -114,11 +115,21 @@ func (r *usageBillingRepository) ReserveBatchImageBalance(ctx context.Context, c
 }
 
 func (r *usageBillingRepository) CaptureBatchImageBalance(ctx context.Context, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {
-	return r.applyBatchImageBalanceHold(ctx, cmd, captureUsageBillingBatchImageBalance)
+	return r.applyBatchImageBalanceHold(ctx, cmd, func(ctx context.Context, tx *sql.Tx, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {
+		if result, handled, err := settleSharedQuotaBatch(ctx, tx, cmd, true); handled {
+			return result, err
+		}
+		return captureUsageBillingBatchImageBalance(ctx, tx, cmd)
+	})
 }
 
 func (r *usageBillingRepository) ReleaseBatchImageBalance(ctx context.Context, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {
-	return r.applyBatchImageBalanceHold(ctx, cmd, releaseUsageBillingBatchImageBalance)
+	return r.applyBatchImageBalanceHold(ctx, cmd, func(ctx context.Context, tx *sql.Tx, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {
+		if result, handled, err := settleSharedQuotaBatch(ctx, tx, cmd, false); handled {
+			return result, err
+		}
+		return releaseUsageBillingBatchImageBalance(ctx, tx, cmd)
+	})
 }
 
 func (r *usageBillingRepository) applyBatchImageBalanceHold(
@@ -172,6 +183,17 @@ func (r *usageBillingRepository) applyBatchImageBalanceHold(
 }
 
 func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand, result *service.UsageBillingApplyResult) error {
+	if cmd.SharedQuotaCost < 0 || math.IsNaN(cmd.SharedQuotaCost) || math.IsInf(cmd.SharedQuotaCost, 0) || (cmd.SharedQuotaCost != 0 && cmd.SharedQuotaWindowID <= 0) {
+		return errors.New("共享计费金额或账期无效")
+	}
+	if cmd.SharedQuotaWindowID > 0 {
+		if cmd.BalanceCost != 0 || cmd.SubscriptionCost != 0 || cmd.APIKeyQuotaCost != 0 || cmd.APIKeyRateLimitCost != 0 {
+			return errors.New("共享计费不能同时扣除个人额度")
+		}
+		if err := applySharedQuotaUsage(ctx, tx, cmd.SharedQuotaWindowID, cmd.SharedQuotaCost); err != nil {
+			return err
+		}
+	}
 	if cmd.SubscriptionCost > 0 && cmd.SubscriptionID != nil {
 		if err := incrementUsageBillingSubscription(ctx, tx, *cmd.SubscriptionID, cmd.SubscriptionCost); err != nil {
 			return err
@@ -273,6 +295,9 @@ func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, am
 }
 
 func reserveUsageBillingBatchImageBalance(ctx context.Context, tx *sql.Tx, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {
+	if q := service.SharedQuotaFromContext(ctx); q != nil {
+		return reserveSharedQuotaBatch(ctx, tx, cmd, q)
+	}
 	if cmd.HoldAmount <= 0 {
 		return &service.BatchImageBalanceHoldResult{}, nil
 	}

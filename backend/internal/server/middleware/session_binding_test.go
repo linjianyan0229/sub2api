@@ -41,6 +41,11 @@ func TestSessionBindingContextFollowsForwardedIPSwitch(t *testing.T) {
 				require.Equal(t, tc.wantIP, binding.IP)
 				require.Equal(t, "test-agent", binding.UserAgent)
 				require.Equal(t, tc.wantIP, SecurityClientIP(c))
+				registrationIP := "127.0.0.1"
+				if len(tc.trustedProxies) > 0 {
+					registrationIP = "1.2.3.4"
+				}
+				require.Equal(t, registrationIP, service.RegistrationIPFromContext(c.Request.Context()), "注册限制只信任已配置的代理")
 				c.Status(200)
 			})
 

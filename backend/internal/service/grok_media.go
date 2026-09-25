@@ -375,12 +375,15 @@ func (s *OpenAIGatewayService) SelectMediaVideoRequestAccount(
 // first observes a completed video URL. Status may omit model/duration; we fall
 // back to this snapshot, then defaults.
 type GrokVideoPendingBilling struct {
-	Model                string `json:"model"`
-	BillingModel         string `json:"billing_model,omitempty"`
-	UpstreamModel        string `json:"upstream_model,omitempty"`
-	VideoResolution      string `json:"video_resolution,omitempty"`
-	VideoDurationSeconds int    `json:"video_duration_seconds,omitempty"`
-	OriginalModel        string `json:"original_model,omitempty"`
+	BillingSubscriptionID *int64               `json:"billing_subscription_id,omitempty"`
+	BillingPolicyCaptured bool                 `json:"billing_policy_captured,omitempty"`
+	SharedQuota           *SharedQuotaSnapshot `json:"shared_quota,omitempty"`
+	Model                 string               `json:"model"`
+	BillingModel          string               `json:"billing_model,omitempty"`
+	UpstreamModel         string               `json:"upstream_model,omitempty"`
+	VideoResolution       string               `json:"video_resolution,omitempty"`
+	VideoDurationSeconds  int                  `json:"video_duration_seconds,omitempty"`
+	OriginalModel         string               `json:"original_model,omitempty"`
 	// CreatedAt is when the gateway accepted the async create (RFC3339Nano UTC).
 	// duration_ms for deferred billing is measured from this instant until the
 	// first official done+video.url observation (status poll or content download),
@@ -473,7 +476,17 @@ func (s *OpenAIGatewayService) StoreGrokVideoPendingBilling(
 	if err != nil {
 		return err
 	}
+	if repo, ok := s.usageBillingRepo.(mediaBillingSnapshotRepository); ok {
+		if err := repo.StoreMediaBillingSnapshot(ctx, key, payload); err != nil {
+			return err
+		}
+	}
 	return s.cache.SetGrokVideoPendingBilling(ctx, key, payload, grokVideoPendingBillingTTL(s.cfg))
+}
+
+type mediaBillingSnapshotRepository interface {
+	StoreMediaBillingSnapshot(context.Context, string, []byte) error
+	LoadMediaBillingSnapshot(context.Context, string) ([]byte, error)
 }
 
 // LoadGrokVideoPendingBilling returns the create-time snapshot (may be nil on miss).
@@ -489,7 +502,17 @@ func (s *OpenAIGatewayService) LoadGrokVideoPendingBilling(
 	if key == "" {
 		return nil, fmt.Errorf("grok video pending billing key is invalid")
 	}
-	payload, err := s.cache.GetGrokVideoPendingBilling(ctx, key)
+	var payload []byte
+	var err error
+	if repo, ok := s.usageBillingRepo.(mediaBillingSnapshotRepository); ok {
+		payload, err = repo.LoadMediaBillingSnapshot(ctx, key)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(payload) == 0 {
+		payload, err = s.cache.GetGrokVideoPendingBilling(ctx, key)
+	}
 	if err != nil || len(payload) == 0 {
 		return nil, err
 	}

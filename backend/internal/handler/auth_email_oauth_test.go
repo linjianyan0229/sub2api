@@ -279,7 +279,7 @@ func TestCompleteEmailOAuthRegistrationUsesAffiliateCodeFromPendingSession(t *te
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
 	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue("browser-aff-key")})
-	c.Request = req
+	c.Request = req.WithContext(service.WithRegistrationIP(req.Context(), "192.0.2.55"))
 
 	handler.completeEmailOAuthRegistration(c, "google")
 

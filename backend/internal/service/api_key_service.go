@@ -283,6 +283,7 @@ type RateLimitCacheInvalidator interface {
 }
 
 type APIKeyService struct {
+	sharedQuota               *SharedQuotaService
 	apiKeyRepo                APIKeyRepository
 	userRepo                  UserRepository
 	groupRepo                 GroupRepository
@@ -448,6 +449,14 @@ func (s *APIKeyService) incrementAPIKeyErrorCount(ctx context.Context, userID in
 // 对于订阅类型分组：检查用户是否有有效订阅
 // 对于标准类型分组：使用原有的 AllowedGroups 和 IsExclusive 逻辑
 func (s *APIKeyService) canUserBindGroup(ctx context.Context, user *User, group *Group) bool {
+	q, err := s.sharedQuota.Snapshot(ctx, user)
+	if err != nil {
+		return false
+	}
+	if q != nil {
+		return user.CanBindGroup(group.ID, group.IsExclusive)
+	}
+
 	// 订阅类型分组：需要有效订阅
 	if group.IsSubscriptionType() {
 		_, err := s.userSubRepo.GetActiveByUserIDAndGroupID(ctx, user.ID, group.ID)
@@ -466,6 +475,17 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get user: %w", err)
+	}
+
+	quota, err := s.sharedQuota.Snapshot(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+	if quota != nil {
+		req.Quota = 0
+		req.RateLimit5h = 0
+		req.RateLimit1d = 0
+		req.RateLimit7d = 0
 	}
 
 	// 验证 IP 白名单格式
@@ -770,6 +790,19 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 		return nil, ErrInsufficientPerms
 	}
 
+	quota, err := s.SharedQuotaForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if quota != nil {
+		req.Quota = nil
+		req.ResetQuota = nil
+		req.RateLimit5h = nil
+		req.RateLimit1d = nil
+		req.RateLimit7d = nil
+		req.ResetRateLimitUsage = nil
+	}
+
 	// 验证 IP 白名单格式
 	if req.IPWhitelist != nil && len(*req.IPWhitelist) > 0 {
 		if invalid := ip.ValidateIPPatterns(*req.IPWhitelist); len(invalid) > 0 {
@@ -1024,6 +1057,12 @@ func (s *APIKeyService) GetAvailableGroups(ctx context.Context, userID int64) ([
 		return nil, fmt.Errorf("get user: %w", err)
 	}
 
+	q, err := s.sharedQuota.Snapshot(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+	user.SharedQuota = q
+
 	// 获取所有活跃分组
 	allGroups, err := s.groupRepo.ListActive(ctx)
 	if err != nil {
@@ -1031,7 +1070,10 @@ func (s *APIKeyService) GetAvailableGroups(ctx context.Context, userID int64) ([
 	}
 
 	// 获取用户的所有有效订阅
-	activeSubscriptions, err := s.userSubRepo.ListActiveByUserID(ctx, userID)
+	var activeSubscriptions []UserSubscription
+	if q == nil {
+		activeSubscriptions, err = s.userSubRepo.ListActiveByUserID(ctx, userID)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("list active subscriptions: %w", err)
 	}
@@ -1056,7 +1098,7 @@ func (s *APIKeyService) GetAvailableGroups(ctx context.Context, userID int64) ([
 // canUserBindGroupInternal 内部方法，检查用户是否可以绑定分组（使用预加载的订阅数据）
 func (s *APIKeyService) canUserBindGroupInternal(user *User, group *Group, subscribedGroupIDs map[int64]bool) bool {
 	// 订阅类型分组：需要有效订阅
-	if group.IsSubscriptionType() {
+	if group.IsSubscriptionType() && user.SharedQuota == nil {
 		return subscribedGroupIDs[group.ID]
 	}
 	// 标准类型分组：使用原有逻辑

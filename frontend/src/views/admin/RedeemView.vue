@@ -141,7 +141,7 @@
             </span>
           </template>
 
-          <template #cell-status="{ value }">
+          <template #cell-status="{ value, row }">
             <span
               :class="[
                 'badge',
@@ -152,13 +152,13 @@
                     : 'badge-danger'
               ]"
             >
-              {{ t('admin.redeem.status.' + value) }}
+              {{ row.type === 'invitation' && value === 'unused' ? t('admin.redeem.invitationAvailable') : row.type === 'invitation' && value === 'used' ? t('admin.redeem.invitationFull') : t('admin.redeem.status.' + value) }}
             </span>
           </template>
 
           <template #cell-used_by="{ value, row }">
             <span class="text-sm text-gray-500 dark:text-dark-400">
-              {{ row.user?.email || (value ? t('admin.redeem.userPrefix', { id: value }) : '-') }}
+              {{ row.type === 'invitation' ? `${row.used_count ?? 0} / ${row.max_uses ?? 1}` : row.user?.email || (value ? t('admin.redeem.userPrefix', { id: value }) : '-') }}
             </span>
           </template>
 
@@ -183,6 +183,7 @@
 
           <template #cell-actions="{ row }">
             <div class="flex items-center space-x-2">
+              <button v-if="row.type === 'invitation'" type="button" class="btn btn-secondary btn-sm" @click="invitationCode = row">{{ t('admin.redeem.invitationUsage') }}</button>
               <button
                 v-if="row.status === 'unused'"
                 @click="handleDelete(row)"
@@ -198,7 +199,7 @@
                 </svg>
                 <span class="text-xs">{{ t('common.delete') }}</span>
               </button>
-              <span v-else class="text-gray-400 dark:text-dark-500">-</span>
+              <span v-else-if="row.type !== 'invitation'" class="text-gray-400 dark:text-dark-500">-</span>
             </div>
           </template>
         </DataTable>
@@ -272,6 +273,8 @@
       @cancel="showDeleteUnusedDialog = false"
     />
 
+    <InvitationUsageDialog :code="invitationCode" @close="invitationCode = null" @updated="loadCodes" />
+
     <!-- Generate Codes Dialog -->
     <Teleport to="body">
       <div v-if="showGenerateDialog" class="fixed inset-0 z-50 flex items-center justify-center">
@@ -306,12 +309,11 @@
               />
             </div>
             <!-- 邀请码类型：显示提示信息 -->
-            <div v-if="generateForm.type === 'invitation'" class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
-              <p class="text-sm text-blue-700 dark:text-blue-300">
-                {{ t('admin.redeem.invitationHint') }}
-              </p>
+            <div v-if="generateForm.type === 'invitation'">
+              <label for="generate-invitation-max-uses" class="input-label">{{ t('admin.redeem.maxUses') }}</label>
+              <input id="generate-invitation-max-uses" v-model.number="generateForm.max_uses" type="number" min="1" max="2147483647" step="1" required class="input" />
             </div>
-            <!-- 订阅类型：显示分组选择和有效天数 -->
+
             <template v-if="generateForm.type === 'subscription'">
               <div>
                 <label class="input-label">{{ t('admin.redeem.selectGroup') }}</label>
@@ -636,6 +638,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
+import InvitationUsageDialog from '@/components/admin/InvitationUsageDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
@@ -644,6 +647,7 @@ import Icon from '@/components/icons/Icon.vue'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const invitationCode = ref<RedeemCode | null>(null)
 const { copyToClipboard: clipboardCopy } = useClipboard()
 const browserTimeZone = getBrowserTimeZone()
 
@@ -839,6 +843,7 @@ const generateForm = reactive({
   type: 'balance' as RedeemCodeType,
   value: 10,
   count: 1,
+  max_uses: 1,
   group_id: null as number | null,
   validity_days: 30,
   expiry_option: 'never' as RedeemCodeExpiryOption,
@@ -1046,7 +1051,8 @@ const handleGenerateCodes = async () => {
       generateForm.value,
       generateForm.type === 'subscription' ? generateForm.group_id : undefined,
       generateForm.type === 'subscription' ? generateForm.validity_days : undefined,
-      expiresInDays
+      expiresInDays,
+      generateForm.type === 'invitation' ? generateForm.max_uses : undefined
     )
     showGenerateDialog.value = false
     generatedCodes.value = result

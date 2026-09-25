@@ -7,6 +7,7 @@ import (
 )
 
 type User struct {
+	SharedQuota    *SharedQuotaSnapshot // 请求级计费快照，不持久化到用户表。
 	ID             int64
 	Email          string
 	Username       string

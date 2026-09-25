@@ -1,5 +1,7 @@
 # Sub2API Docker Image
 
+本定制版本使用腾讯云 CCR；部署、外部数据库配置和自动更新请参见 [CCR.md](CCR.md)。下文为原上游镜像说明。
+
 Sub2API is an AI API Gateway Platform for distributing and managing AI product subscription API quotas.
 
 ## Quick Start

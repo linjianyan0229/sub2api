@@ -16,6 +16,7 @@ import (
 
 const (
 	PluginCapabilityOpenAIOAuthOutbound = "openai.oauth.outbound_transport.v1"
+	PluginCapabilitySharedQuota         = "billing.shared_daily_quota.v1"
 	PluginStateDisabled                 = "disabled"
 	PluginStateStarting                 = "starting"
 	PluginStateEnabled                  = "enabled"
@@ -169,8 +170,13 @@ func (m PluginManifest) Validate() error {
 		return errors.New("插件必须声明至少一个能力")
 	}
 	for _, capability := range m.Capabilities {
-		if capability.ID != PluginCapabilityOpenAIOAuthOutbound || capability.Platform != PlatformOpenAI || capability.AccountType != AccountTypeOAuth {
-			return fmt.Errorf("初期仅支持能力 %s", PluginCapabilityOpenAIOAuthOutbound)
+		transport := capability.ID == PluginCapabilityOpenAIOAuthOutbound && capability.Platform == PlatformOpenAI && capability.AccountType == AccountTypeOAuth
+		shared := capability.ID == PluginCapabilitySharedQuota && capability.Platform == "all" && capability.AccountType == "all"
+		if !transport && !shared {
+			return fmt.Errorf("不支持的插件能力: %s", capability.ID)
+		}
+		if shared && len(m.Capabilities) != 1 {
+			return errors.New("共享额度插件必须独立声明计费能力")
 		}
 	}
 	runtimeEntry, ok := m.Runtimes[m.RuntimeKey()]

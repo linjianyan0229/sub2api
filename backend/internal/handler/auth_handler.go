@@ -116,6 +116,10 @@ func (h *AuthHandler) respondWithTokenPair(c *gin.Context, user *service.User) {
 }
 
 func respondWithTokenPair(c *gin.Context, authService *service.AuthService, user *service.User) {
+	if err := authService.ApplySharedQuotaView(c.Request.Context(), user); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	if err := ensureLoginUserActive(user); err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -434,6 +438,10 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 		return
 	}
 
+	if err := h.userService.ApplySharedQuotaView(c.Request.Context(), user); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	identities, err := h.userService.GetProfileIdentitySummaries(c.Request.Context(), subject.UserID, user)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -573,7 +581,7 @@ func (h *AuthHandler) ValidateInvitationCode(c *gin.Context) {
 		return
 	}
 
-	if redeemCode.Status != service.StatusUnused {
+	if !redeemCode.CanUse() {
 		response.Success(c, ValidateInvitationCodeResponse{
 			Valid:     false,
 			ErrorCode: "INVITATION_CODE_USED",

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 // 未用到的方法走嵌入接口（调用即 panic，注册路径不会触发）。
 type raceSafeUserRepo struct {
 	UserRepository
+	client *dbent.Client
 
 	mu      sync.Mutex
 	nextID  int64
@@ -39,13 +41,25 @@ func (s *raceSafeUserRepo) ExistsByEmailAlias(ctx context.Context, email string)
 	return s.ExistsByEmail(ctx, email)
 }
 
-func (s *raceSafeUserRepo) CreateWithEmailAliasGuard(_ context.Context, user *User) error {
+func (s *raceSafeUserRepo) CreateWithEmailAliasGuard(ctx context.Context, user *User) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.byEmail[user.Email]; ok {
 		return ErrEmailExists
 	}
-	user.ID = s.nextID
+	if s.client != nil {
+		client := s.client
+		if tx := dbent.TxFromContext(ctx); tx != nil {
+			client = tx.Client()
+		}
+		entity, err := client.User.Create().SetEmail(user.Email).SetPasswordHash(user.PasswordHash).Save(ctx)
+		if err != nil {
+			return err
+		}
+		user.ID = entity.ID
+	} else {
+		user.ID = s.nextID
+	}
 	s.nextID++
 	clone := *user
 	s.byEmail[user.Email] = &clone
@@ -144,6 +158,10 @@ func TestAuthService_Register_InvitationCodeSingleUseUnderConcurrency(t *testing
 		&userPlatformQuotaRepoStub{},
 	)
 
+	client := newInvitationTestClient(t)
+	svc.entClient = client
+	userRepo.client = client
+	client.RedeemCode.Create().SetCode(code).SetType(RedeemTypeInvitation).SaveX(context.Background())
 	const n = 8
 	ctx := context.Background()
 	start := make(chan struct{})
@@ -155,7 +173,7 @@ func TestAuthService_Register_InvitationCodeSingleUseUnderConcurrency(t *testing
 			defer wg.Done()
 			<-start
 			email := fmt.Sprintf("race-%d@example.com", i)
-			_, _, err := svc.RegisterWithVerification(ctx, email, "Password123!", "", "", code, "")
+			_, _, err := svc.RegisterWithVerification(WithRegistrationIP(ctx, fmt.Sprintf("192.0.2.%d", i+1)), email, "Password123!", "", "", code, "")
 			results <- err
 		}(i)
 	}
@@ -178,10 +196,11 @@ func TestAuthService_Register_InvitationCodeSingleUseUnderConcurrency(t *testing
 	require.Equal(t, 1, successes, "同一邀请码并发注册必须恰好成功 1 次")
 	require.Equal(t, n-1, rejected, "其余并发请求必须以 INVITATION_CODE_INVALID 拒绝")
 
-	claimed, err := redeemRepo.GetByCode(ctx, code)
+	claimed, err := client.RedeemCode.Get(ctx, 1)
 	require.NoError(t, err)
 	require.Equal(t, StatusUsed, claimed.Status, "邀请码最终必须处于 used 状态")
 	require.NotNil(t, claimed.UsedBy, "used_by 必须记录实际注册用户")
+	require.Equal(t, 1, client.User.Query().CountX(ctx), "失败的注册不能留下账号")
 }
 
 // TestAuthService_Register_InvitationCodeRejectedWhenAlreadyUsed 顺序路径回归：

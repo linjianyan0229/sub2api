@@ -63,7 +63,7 @@ func reserveBatchImageBalanceHold(ctx context.Context, repo UsageBillingReposito
 	if err != nil {
 		return err
 	}
-	if cmd.HoldAmount <= 0 {
+	if cmd.HoldAmount <= 0 && SharedQuotaFromContext(ctx) == nil {
 		return nil
 	}
 	if _, err := repo.ReserveBatchImageBalance(ctx, cmd); err != nil {

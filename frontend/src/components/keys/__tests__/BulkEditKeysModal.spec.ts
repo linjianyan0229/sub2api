@@ -6,6 +6,9 @@ import type { Group } from '@/types'
 const { bulkUpdate, showSuccess, showError } = vi.hoisted(() => ({
   bulkUpdate: vi.fn(), showSuccess: vi.fn(), showError: vi.fn()
 }))
+const authState = vi.hoisted(() => ({ isSharedQuota: false }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => authState }))
+
 vi.mock('@/api', () => ({ keysAPI: { bulkUpdate } }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess, showError }) }))
 vi.mock('vue-i18n', () => ({
@@ -40,8 +43,17 @@ const mountModal = () => mount(BulkEditKeysModal, {
 
 describe('BulkEditKeysModal', () => {
   beforeEach(() => {
+    authState.isSharedQuota = false
     vi.clearAllMocks()
     bulkUpdate.mockResolvedValue({ succeededIds: [1, 2], failures: [] })
+  })
+
+  it('共享模式隐藏金额选项，同时保留凭证状态配置', () => {
+    authState.isSharedQuota = true
+    const wrapper = mountModal()
+    expect(wrapper.find('[data-test="enable-quota"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="enable-rate_limit_1d"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="enable-status"]').exists()).toBe(true)
   })
 
   it('requires an explicit field choice and sends only that field', async () => {

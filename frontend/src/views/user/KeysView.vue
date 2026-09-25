@@ -223,7 +223,7 @@
                 </span>
               </div>
               <!-- Quota progress (if quota is set) -->
-              <div v-if="row.quota > 0" class="mt-1.5">
+              <div v-if="!authStore.isSharedQuota && row.quota > 0" class="mt-1.5">
                 <div class="flex items-center gap-1.5">
                   <span class="text-gray-500 dark:text-gray-400">{{ t('keys.quota') }}:</span>
                   <span :class="[
@@ -669,7 +669,7 @@
         </div>
 
         <!-- Quota Limit Section -->
-        <div class="space-y-3">
+        <div v-if="!authStore.isSharedQuota" class="space-y-3">
           <label class="input-label">{{ t('keys.quotaLimit') }}</label>
           <!-- Switch commented out - always show input, 0 = unlimited
           <div class="flex items-center justify-between">
@@ -735,7 +735,7 @@
         </div>
 
         <!-- Rate Limit Section -->
-        <div class="space-y-3">
+        <div v-if="!authStore.isSharedQuota" class="space-y-3">
           <div class="flex items-center justify-between">
             <label class="input-label mb-0">{{ t('keys.rateLimitSection') }}</label>
             <button
@@ -755,7 +755,7 @@
             </button>
           </div>
 
-          <div v-if="formData.enable_rate_limit" class="space-y-4 pt-2">
+          <div v-if="!authStore.isSharedQuota && formData.enable_rate_limit" class="space-y-4 pt-2">
             <p class="input-hint -mt-2">{{ t('keys.rateLimitHint') }}</p>
             <!-- 5-Hour Limit -->
             <div>
@@ -1201,11 +1201,13 @@
 	import { ref, reactive, computed, watch, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
 	import { useI18n } from 'vue-i18n'
 	import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 	import { useOnboardingStore } from '@/stores/onboarding'
 	import { useClipboard } from '@/composables/useClipboard'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 
 const { t } = useI18n()
+const authStore = useAuthStore()
 import { keysAPI, authAPI, usageAPI, userGroupsAPI } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -1351,7 +1353,7 @@ const toggleColumn = (key: string) => {
 const isColumnVisible = (key: string) => !hiddenColumns.has(key)
 
 const columns = computed<Column[]>(() =>
-  allColumns.value.filter((col) => ALWAYS_VISIBLE_COLUMNS.has(col.key) || !hiddenColumns.has(col.key))
+  allColumns.value.filter((col) => (!authStore.isSharedQuota || !['rate_limit', 'quota'].includes(col.key)) && (ALWAYS_VISIBLE_COLUMNS.has(col.key) || !hiddenColumns.has(col.key)))
 )
 
 const apiKeys = ref<ApiKey[]>([])
@@ -1857,11 +1859,8 @@ const handleSubmit = async () => {
         group_id: formData.value.group_id,
         ip_whitelist: ipWhitelist,
         ip_blacklist: ipBlacklist,
-        quota: quota,
         expires_at: expiresAt,
-        rate_limit_5h: rateLimitData.rate_limit_5h,
-        rate_limit_1d: rateLimitData.rate_limit_1d,
-        rate_limit_7d: rateLimitData.rate_limit_7d,
+        ...(!authStore.isSharedQuota ? { quota, ...rateLimitData } : {}),
       }
       if (shouldSubmitEditStatus(selectedKey.value, formData.value.status)) {
         updates.status = formData.value.status

@@ -17,6 +17,8 @@ type RedeemCode struct {
 	Notes     string
 	CreatedAt time.Time
 	ExpiresAt *time.Time
+	MaxUses   int
+	UsedCount int
 
 	GroupID      *int64
 	ValidityDays int
@@ -44,6 +46,9 @@ func (r *RedeemCode) IsExpiredAt(now time.Time) bool {
 }
 
 func (r *RedeemCode) CanUse() bool {
+	if r.Type == RedeemTypeInvitation && r.UsedCount >= max(1, r.MaxUses) {
+		return false
+	}
 	return r.Status == StatusUnused && !r.IsExpired()
 }
 

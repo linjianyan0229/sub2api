@@ -1,0 +1,11 @@
+[Unit]
+Description=Sub2API CCR 镜像更新
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/sub2api
+ExecStart=/bin/bash /opt/sub2api/update-ccr.sh -f /opt/sub2api/docker-compose.yml --env-file /opt/sub2api/.env
+TimeoutStartSec=30min

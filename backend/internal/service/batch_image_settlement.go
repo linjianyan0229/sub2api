@@ -149,6 +149,17 @@ func (s *BatchImageSettlementService) Settle(ctx context.Context, batchID string
 		return nil, ErrBatchImageSettlementCostExceedsHold
 	}
 
+	if source, ok := s.BillingRepo.(interface {
+		BatchSharedQuota(context.Context, string) (*SharedQuotaSnapshot, error)
+	}); ok {
+		quota, err := source.BatchSharedQuota(ctx, job.BatchID)
+		if err != nil {
+			return nil, ErrBatchImageSettlementBillingFailed.WithCause(err)
+		}
+		if quota != nil {
+			ctx = WithSharedQuota(ctx, quota)
+		}
+	}
 	if err := captureBatchImageBalanceHold(ctx, s.BillingRepo, job, actualCost, manifestHash); err != nil {
 		msg := truncateBatchImageMessage(err.Error(), batchImageMaxErrorMessageLength)
 		if failErr := s.recordSettlementFailure(ctx, job, "SETTLEMENT_BILLING_FAILED", msg); failErr != nil {
@@ -279,6 +290,9 @@ func (s *BatchImageSettlementService) recordUsageLog(ctx context.Context, job *B
 		ImageSize:             &imageSize,
 		SessionID:             job.SessionID,
 		CreatedAt:             createdAt,
+	}
+	if SharedQuotaFromContext(ctx) != nil {
+		usageLog.BillingType = BillingTypeSharedQuota
 	}
 	writeUsageLogBestEffort(ctx, s.UsageLogRepo, usageLog, "service.batch_image_settlement")
 }

@@ -96,6 +96,8 @@ export const useAuthStore = defineStore('auth', () => {
     return user.value?.role === 'admin'
   })
 
+  const isSharedQuota = computed(() => !isAdmin.value && !!user.value?.shared_quota)
+
   const isSimpleMode = computed(() => runMode.value === 'simple')
   const hasPendingAuthSession = computed(() => pendingAuthSession.value !== null)
 
@@ -499,6 +501,7 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     isAdmin,
     isSimpleMode,
+    isSharedQuota,
     hasPendingAuthSession,
 
     // Actions

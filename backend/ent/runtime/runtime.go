@@ -24,6 +24,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
+	"github.com/Wei-Shaw/sub2api/ent/invitationusage"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -1285,6 +1286,24 @@ func init() {
 	identityadoptiondecisionDescDecidedAt := identityadoptiondecisionFields[4].Descriptor()
 	// identityadoptiondecision.DefaultDecidedAt holds the default value on creation for the decided_at field.
 	identityadoptiondecision.DefaultDecidedAt = identityadoptiondecisionDescDecidedAt.Default.(func() time.Time)
+	invitationusageFields := schema.InvitationUsage{}.Fields()
+	_ = invitationusageFields
+	// invitationusageDescUsername is the schema descriptor for username field.
+	invitationusageDescUsername := invitationusageFields[2].Descriptor()
+	// invitationusage.DefaultUsername holds the default value on creation for the username field.
+	invitationusage.DefaultUsername = invitationusageDescUsername.Default.(string)
+	// invitationusageDescEmail is the schema descriptor for email field.
+	invitationusageDescEmail := invitationusageFields[3].Descriptor()
+	// invitationusage.DefaultEmail holds the default value on creation for the email field.
+	invitationusage.DefaultEmail = invitationusageDescEmail.Default.(string)
+	// invitationusageDescIP is the schema descriptor for ip field.
+	invitationusageDescIP := invitationusageFields[4].Descriptor()
+	// invitationusage.IPValidator is a validator for the "ip" field. It is called by the builders before save.
+	invitationusage.IPValidator = invitationusageDescIP.Validators[0].(func(string) error)
+	// invitationusageDescCreatedAt is the schema descriptor for created_at field.
+	invitationusageDescCreatedAt := invitationusageFields[5].Descriptor()
+	// invitationusage.DefaultCreatedAt holds the default value on creation for the created_at field.
+	invitationusage.DefaultCreatedAt = invitationusageDescCreatedAt.Default.(func() time.Time)
 	paymentauditlogFields := schema.PaymentAuditLog{}.Fields()
 	_ = paymentauditlogFields
 	// paymentauditlogDescOrderID is the schema descriptor for order_id field.
@@ -1761,6 +1780,18 @@ func init() {
 	redeemcodeDescValidityDays := redeemcodeFields[10].Descriptor()
 	// redeemcode.DefaultValidityDays holds the default value on creation for the validity_days field.
 	redeemcode.DefaultValidityDays = redeemcodeDescValidityDays.Default.(int)
+	// redeemcodeDescMaxUses is the schema descriptor for max_uses field.
+	redeemcodeDescMaxUses := redeemcodeFields[11].Descriptor()
+	// redeemcode.DefaultMaxUses holds the default value on creation for the max_uses field.
+	redeemcode.DefaultMaxUses = redeemcodeDescMaxUses.Default.(int)
+	// redeemcode.MaxUsesValidator is a validator for the "max_uses" field. It is called by the builders before save.
+	redeemcode.MaxUsesValidator = redeemcodeDescMaxUses.Validators[0].(func(int) error)
+	// redeemcodeDescUsedCount is the schema descriptor for used_count field.
+	redeemcodeDescUsedCount := redeemcodeFields[12].Descriptor()
+	// redeemcode.DefaultUsedCount holds the default value on creation for the used_count field.
+	redeemcode.DefaultUsedCount = redeemcodeDescUsedCount.Default.(int)
+	// redeemcode.UsedCountValidator is a validator for the "used_count" field. It is called by the builders before save.
+	redeemcode.UsedCountValidator = redeemcodeDescUsedCount.Validators[0].(func(int) error)
 	securitysecretMixin := schema.SecuritySecret{}.Mixin()
 	securitysecretMixinFields0 := securitysecretMixin[0].Fields()
 	_ = securitysecretMixinFields0
