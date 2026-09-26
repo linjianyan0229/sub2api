@@ -114,6 +114,11 @@ export default defineConfig(({ mode }) => {
          */
         manualChunks(id: string) {
           if (id.includes('node_modules')) {
+            // 全屏论坛通报触发时才加载 Three.js。
+            if (id.includes('/three/')) {
+              return 'vendor-three'
+            }
+
             // Vue 核心库
             if (
               id.includes('/vue/') ||

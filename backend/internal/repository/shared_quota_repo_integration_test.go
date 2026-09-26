@@ -20,7 +20,7 @@ func TestSharedQuotaRepositoryConcurrentBillingAndBatchSettlement(t *testing.T) 
 	repo := NewUsageBillingRepository(client, integrationDB)
 	shared := NewSharedQuotaRepository(integrationDB)
 	start := time.Now().UTC().Truncate(time.Second)
-	window, err := shared.Window(ctx, "test."+uuid.NewString(), start, start.Add(24*time.Hour), 100)
+	window, err := ensureSharedQuotaWindow(ctx, integrationDB, "test."+uuid.NewString(), start, start.Add(24*time.Hour), 100)
 	require.NoError(t, err)
 	var keys []*service.APIKey
 	for i := 0; i < 2; i++ {

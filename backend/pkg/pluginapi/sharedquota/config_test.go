@@ -16,6 +16,22 @@ func TestConfigValidation(t *testing.T) {
 	}
 }
 
+func TestQuotaApplyMode(t *testing.T) {
+	for _, tt := range []struct{ raw, want string }{
+		{`{"daily_quota":100,"reset_time":"00:00"}`, ApplyImmediately},
+		{`{"daily_quota":100,"reset_time":"00:00","apply_mode":"immediate"}`, ApplyImmediately},
+		{`{"daily_quota":100,"reset_time":"00:00","apply_mode":"next_reset"}`, ApplyNextReset},
+	} {
+		c, err := Parse([]byte(tt.raw))
+		if err != nil || c.ApplyMode != tt.want {
+			t.Fatalf("生效方式解析错误: %+v %v", c, err)
+		}
+	}
+	if _, err := Parse([]byte(`{"daily_quota":100,"reset_time":"00:00","apply_mode":"tomorrow"}`)); err == nil {
+		t.Fatal("应拒绝无效生效方式")
+	}
+}
+
 func TestDailyResetBoundaryAndDST(t *testing.T) {
 	for _, tt := range []struct{ zone, now, start, end string }{
 		{"Asia/Shanghai", "2026-09-25T01:59:59+08:00", "2026-09-24T02:00:00+08:00", "2026-09-25T02:00:00+08:00"},

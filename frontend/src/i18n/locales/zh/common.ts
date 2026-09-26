@@ -177,6 +177,7 @@ export default {
 
   // Navigation
   nav: {
+    forum: '论坛讨论',
     leaderboard: '排行榜',
     dashboard: '仪表盘',
     announcements: '公告',

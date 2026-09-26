@@ -93,8 +93,8 @@ func run() error {
 		hashes[path] = hex.EncodeToString(sum[:])
 	}
 	manifest := map[string]any{
-		"schema_version": 1, "id": "local.sub2api.shared-daily-quota", "name": "全站每日共享额度", "version": "0.1.2", "author": "Local",
-		"requires":     map[string]any{"sub2api": ">=0.2.8 <0.3.0", "recommended_sub2api_version": "0.2.8", "tested_sub2api_versions": []string{"0.2.8"}, "plugin_protocol": 1, "transport_api": 1, "ui_bridge": 1},
+		"schema_version": 1, "id": "local.sub2api.shared-daily-quota", "name": "全站每日共享额度", "version": "0.1.3", "author": "Local",
+		"requires":     map[string]any{"sub2api": ">=0.2.9 <0.3.0", "recommended_sub2api_version": "0.2.9", "tested_sub2api_versions": []string{"0.2.9"}, "plugin_protocol": 1, "transport_api": 1, "ui_bridge": 1},
 		"capabilities": []map[string]string{{"id": "billing.shared_daily_quota.v1", "platform": "all", "account_type": "all"}},
 		"runtimes":     runtimes, "ui": map[string]string{"entrypoint": "ui/index.html"}, "files": hashes,
 	}
@@ -108,7 +108,7 @@ func run() error {
 		return err
 	}
 	files["signature.json"] = signature
-	archive := filepath.Join(*output, "shared-daily-quota-0.1.2.s2plugin")
+	archive := filepath.Join(*output, "shared-daily-quota-0.1.3.s2plugin")
 	f, err := os.Create(archive)
 	if err != nil {
 		return err

@@ -13,6 +13,33 @@ afterEach(() => {
 })
 
 describe('共享额度插件配置', () => {
+  it('加载并保存下次刷新生效方式，允许切换为立即生效', async () => {
+    window.location.hash = 'bridge_token=test-session'
+    document.body.innerHTML = html
+    const send = vi.spyOn(window, 'postMessage').mockImplementation(() => {})
+    window.eval(source)
+    const load = send.mock.calls.map(([data]) => data).find(data => data.type === 'config.load')
+    const response = { source: 'sub2api-plugin-host', bridge_token: 'test-session', request_id: load.request_id, ok: true, config: { daily_quota: 100, reset_time: '04:30', apply_mode: 'next_reset' } }
+    window.dispatchEvent(new MessageEvent('message', { source: window, data: response }))
+    await Promise.resolve()
+    const mode = document.querySelector<HTMLSelectElement>('#apply-mode')!
+    const saveButton = document.querySelector<HTMLButtonElement>('#save')!
+    expect(mode.value).toBe('next_reset')
+    expect(mode.disabled).toBe(false)
+    saveButton.click()
+    const save = send.mock.calls.map(([data]) => data).find(data => data.type === 'config.save')
+    expect(save.config.apply_mode).toBe('next_reset')
+    window.dispatchEvent(new MessageEvent('message', { source: window, data: { ...response, request_id: save.request_id } }))
+    await Promise.resolve()
+    mode.value = 'immediate'
+    saveButton.click()
+    const saves = send.mock.calls.map(([data]) => data).filter(data => data.type === 'config.save')
+    expect(saves[1].config.apply_mode).toBe('immediate')
+    window.dispatchEvent(new MessageEvent('message', { source: window, data: { ...response, request_id: saves[1].request_id } }))
+    await Promise.resolve()
+    expect(document.querySelector('#status')!.textContent).toBe('已保存')
+  })
+
   it.each([true, false])('仅通过当前会话加载和保存配置，randomUUID 可用：%s', async (randomUUIDAvailable) => {
     if (!randomUUIDAvailable) {
       vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) })
@@ -41,7 +68,7 @@ describe('共享额度插件配置', () => {
     expect(submit).not.toHaveBeenCalled()
     expect(saveButton.disabled).toBe(true)
     const save = send.mock.calls.map(([data]) => data).find(data => data.type === 'config.save')
-    expect(save.config).toEqual({ daily_quota: 20, reset_time: '03:30' })
+    expect(save.config).toEqual({ daily_quota: 20, reset_time: '03:30', apply_mode: 'immediate' })
     window.dispatchEvent(new MessageEvent('message', { source: window, data: { ...response, request_id: save.request_id } }))
     await Promise.resolve()
     expect(document.querySelector('#status')!.textContent).toBe('已保存')

@@ -29,6 +29,10 @@ func (r *sharedPluginMemoryRepo) UpdateConfig(_ context.Context, _ int64, cipher
 	r.p.ConfigEncrypted = cipher
 	return nil
 }
+func (r *sharedPluginMemoryRepo) UpdateSharedQuotaConfig(ctx context.Context, update *SharedQuotaConfigUpdate) error {
+	return r.UpdateConfig(ctx, update.PluginID, update.Encrypted, update.ExpectedBinarySHA256)
+}
+
 func (r *sharedPluginMemoryRepo) BeginEnable(context.Context, int64, string, string) error {
 	r.p.State = PluginStateStarting
 	return nil
@@ -64,7 +68,7 @@ func TestSharedQuotaSignedPackageLifecycle(t *testing.T) {
 	}
 	require.NoError(t, yaml.Unmarshal(data, &trust))
 	cfg.Plugins.TrustedPublishers = trust.Plugins.Publishers
-	host := PluginHostInfo{Version: "0.2.8", BuildType: "release"}
+	host := PluginHostInfo{Version: "0.2.9", BuildType: "release"}
 	installer := NewPluginPackageInstaller(cfg, host)
 	f, err := os.Open(packagePath)
 	require.NoError(t, err)
@@ -93,6 +97,9 @@ func TestSharedQuotaSignedPackageLifecycle(t *testing.T) {
 	require.True(t, enabled.RuntimeHealthy)
 	require.Same(t, route, manager.route.Load())
 	runtime := manager.runtimes[1]
+	updated, err := manager.SaveConfig(ctx, 1, []byte(`{"daily_quota":30,"reset_time":"04:30","apply_mode":"next_reset"}`))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"daily_quota":30,"reset_time":"04:30","apply_mode":"next_reset"}`, string(updated))
 	runtime.kill()
 	items, err := repo.List(ctx)
 	require.NoError(t, err)

@@ -12,9 +12,15 @@ import (
 
 const Capability = "billing.shared_daily_quota.v1"
 
+const (
+	ApplyImmediately = "immediate"
+	ApplyNextReset   = "next_reset"
+)
+
 type Config struct {
 	DailyQuota float64 `json:"daily_quota"`
 	ResetTime  string  `json:"reset_time"`
+	ApplyMode  string  `json:"apply_mode,omitempty"`
 }
 
 func Parse(raw []byte) (Config, error) {
@@ -40,6 +46,12 @@ func Parse(raw []byte) (Config, error) {
 	t, err := time.Parse("15:04", c.ResetTime)
 	if err != nil || t.Format("15:04") != c.ResetTime {
 		return c, errors.New("每日刷新时间必须为 HH:mm")
+	}
+	if c.ApplyMode == "" {
+		c.ApplyMode = ApplyImmediately
+	}
+	if c.ApplyMode != ApplyImmediately && c.ApplyMode != ApplyNextReset {
+		return c, errors.New("额度生效方式必须为立即生效或下次刷新时生效")
 	}
 	return c, nil
 }

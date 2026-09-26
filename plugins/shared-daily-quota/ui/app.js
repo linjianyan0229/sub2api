@@ -5,6 +5,7 @@
   const form = document.getElementById('config-form')
   const quota = document.getElementById('daily-quota')
   const reset = document.getElementById('reset-time')
+  const mode = document.getElementById('apply-mode')
   const save = document.getElementById('save')
   const status = document.getElementById('status')
   const notify = (message, error = false) => { status.textContent = message; status.dataset.error = String(error) }
@@ -38,17 +39,18 @@
     if (!form.reportValidity()) return
     save.disabled = true; notify('')
     try {
-      await request('config.save', { config: { daily_quota: Number(quota.value), reset_time: reset.value } })
+      await request('config.save', { config: { daily_quota: Number(quota.value), reset_time: reset.value, apply_mode: mode.value } })
       notify('已保存')
     } catch (error) { notify(error.message, true) }
     finally { save.disabled = false }
   })
   if (!token) { notify('配置会话无效', true); return }
   send('sub2api.plugin.ready')
-  send('ui.resize', { height: 340 })
+  send('ui.resize', { height: 450 })
   request('config.load').then(data => {
     quota.value = data.config?.daily_quota ?? ''
     reset.value = data.config?.reset_time ?? '00:00'
-    quota.disabled = reset.disabled = save.disabled = false
+    mode.value = data.config?.apply_mode ?? 'immediate'
+    quota.disabled = reset.disabled = mode.disabled = save.disabled = false
   }).catch(error => notify(error.message, true))
 })()

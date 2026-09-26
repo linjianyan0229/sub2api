@@ -332,6 +332,12 @@ const ChartIcon = {
     )
 }
 
+const ForumIcon = {
+  render: () => h('svg', { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', 'stroke-width': '1.5' }, [
+    h('path', { 'stroke-linecap': 'round', 'stroke-linejoin': 'round', d: 'M8 10h8M8 14h5M5 4h14a2 2 0 012 2v11a2 2 0 01-2 2H9l-6 3V6a2 2 0 012-2z' })
+  ])
+}
+
 const GiftIcon = {
   render: () =>
     h(
@@ -727,6 +733,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/batch-image', label: t('nav.batchImage'), icon: BatchImageIcon, hideInSimpleMode: true, featureFlag: flagBatchImageAccess },
     { path: '/usage', label: t('nav.usage'), icon: ChartIcon, hideInSimpleMode: true },
     ...(withDashboard ? [{ path: '/leaderboard', label: t('nav.leaderboard'), icon: ChartIcon }] : []),
+    ...(withDashboard ? [{ path: '/forum', label: t('nav.forum'), icon: ForumIcon }] : []),
     { path: '/available-channels', label: t('nav.availableChannels'), icon: ChannelIcon, hideInSimpleMode: true, featureFlag: flagAvailableChannels },
     { path: '/monitor', label: t('nav.channelStatus'), icon: SignalIcon, featureFlag: flagChannelMonitor },
     { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagSubscription },
@@ -838,6 +845,7 @@ const adminNavItems = computed((): NavItem[] => {
     },
     { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon },
     { path: '/leaderboard', label: t('nav.leaderboard'), icon: ChartIcon },
+    { path: '/forum', label: t('nav.forum'), icon: ForumIcon },
     { path: '/admin/audit-logs', label: t('nav.auditLogs'), icon: ShieldIcon, hideInSimpleMode: true }
   ]
 

@@ -2,11 +2,53 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/pkg/pluginapi/sharedquota"
 )
+
+type SharedQuotaConfigUpdate struct {
+	PluginID             int64
+	Encrypted            string
+	ExpectedEncrypted    string
+	ExpectedBinarySHA256 string
+	Previous             *sharedquota.Config
+	Next                 sharedquota.Config
+	Now                  time.Time
+	Location             *time.Location
+}
+
+type SharedQuotaConfigRepository interface {
+	UpdateSharedQuotaConfig(context.Context, *SharedQuotaConfigUpdate) error
+}
+
+func (m *PluginManager) savePluginConfig(ctx context.Context, installation *PluginInstallation, previous, next json.RawMessage, encrypted string) error {
+	if !isSharedQuotaPlugin(installation) {
+		return m.repo.UpdateConfig(ctx, installation.ID, encrypted, installation.BinarySHA256)
+	}
+	repo, ok := m.repo.(SharedQuotaConfigRepository)
+	if !ok {
+		return errors.New("宿主不支持共享额度生效方式")
+	}
+	loc, err := time.LoadLocation(m.cfg.Timezone)
+	if err != nil {
+		return err
+	}
+	config, err := sharedquota.Parse(next)
+	if err != nil {
+		return err
+	}
+	update := &SharedQuotaConfigUpdate{
+		PluginID: installation.ID, Encrypted: encrypted, ExpectedEncrypted: installation.ConfigEncrypted,
+		ExpectedBinarySHA256: installation.BinarySHA256, Next: config, Now: time.Now(), Location: loc,
+	}
+	if old, err := sharedquota.Parse(previous); err == nil {
+		update.Previous = &old
+	}
+	return repo.UpdateSharedQuotaConfig(ctx, update)
+}
 
 func isSharedQuotaPlugin(p *PluginInstallation) bool {
 	if p == nil {

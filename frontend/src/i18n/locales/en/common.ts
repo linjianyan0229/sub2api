@@ -177,6 +177,7 @@ export default {
 
   // Navigation
   nav: {
+    forum: 'Forum',
     leaderboard: 'Leaderboard',
     dashboard: 'Dashboard',
     announcements: 'Announcements',

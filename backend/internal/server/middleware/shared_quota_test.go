@@ -25,7 +25,7 @@ type sharedAuthRepo struct {
 func (r *sharedAuthRepo) ActivePolicy(context.Context) (*service.SharedQuotaPolicy, error) {
 	return &service.SharedQuotaPolicy{PluginKey: "test.shared", ConfigEncrypted: `{"daily_quota":100,"reset_time":"00:00"}`}, r.err
 }
-func (r *sharedAuthRepo) Window(context.Context, string, time.Time, time.Time, float64) (*service.SharedQuotaSnapshot, error) {
+func (r *sharedAuthRepo) Window(context.Context, *service.SharedQuotaPolicy, time.Time, time.Time, time.Time, float64) (*service.SharedQuotaSnapshot, error) {
 	return &service.SharedQuotaSnapshot{WindowID: 1, Total: 100, Remaining: r.remaining}, r.err
 }
 

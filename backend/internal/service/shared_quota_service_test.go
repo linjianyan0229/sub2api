@@ -12,21 +12,35 @@ import (
 )
 
 type sharedQuotaTestRepo struct {
-	policy *SharedQuotaPolicy
-	quota  SharedQuotaSnapshot
-	err    error
-	reads  int
+	policy        *SharedQuotaPolicy
+	quota         SharedQuotaSnapshot
+	err           error
+	reads         int
+	windowChanged bool
 }
 
 func (r *sharedQuotaTestRepo) ActivePolicy(context.Context) (*SharedQuotaPolicy, error) {
 	r.reads++
 	return r.policy, r.err
 }
-func (r *sharedQuotaTestRepo) Window(_ context.Context, _ string, _, end time.Time, total float64) (*SharedQuotaSnapshot, error) {
+func (r *sharedQuotaTestRepo) Window(_ context.Context, _ *SharedQuotaPolicy, _, _, end time.Time, total float64) (*SharedQuotaSnapshot, error) {
+	if r.windowChanged {
+		r.windowChanged = false
+		return nil, ErrSharedQuotaPolicyChanged
+	}
 	q := r.quota
 	q.Total = total
 	q.ResetsAt = end
 	return &q, r.err
+}
+
+func TestSharedQuotaRetriesChangedPolicy(t *testing.T) {
+	repo := &sharedQuotaTestRepo{policy: &SharedQuotaPolicy{PluginKey: "test.shared", ConfigEncrypted: `{"daily_quota":200,"reset_time":"00:00","apply_mode":"next_reset"}`}, windowChanged: true}
+	svc, err := NewSharedQuotaService(repo, sharedQuotaTestEncryptor{}, &config.Config{Timezone: "Asia/Shanghai"})
+	require.NoError(t, err)
+	_, err = svc.Snapshot(context.Background(), &User{Role: RoleUser})
+	require.NoError(t, err)
+	require.Equal(t, 2, repo.reads)
 }
 func (r *sharedQuotaTestRepo) GetWindow(context.Context, int64) (*SharedQuotaSnapshot, error) {
 	q := r.quota

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -10,6 +11,8 @@ import (
 )
 
 var ErrSharedQuotaExhausted = infraerrors.TooManyRequests("SHARED_QUOTA_EXHAUSTED", "全站每日共享额度已用完")
+
+var ErrSharedQuotaPolicyChanged = errors.New("共享额度配置已变更")
 
 type SharedQuotaSnapshot struct {
 	WindowID  int64     `json:"window_id"`
@@ -25,7 +28,7 @@ type SharedQuotaPolicy struct{ PluginKey, ConfigEncrypted string }
 
 type SharedQuotaRepository interface {
 	ActivePolicy(context.Context) (*SharedQuotaPolicy, error)
-	Window(context.Context, string, time.Time, time.Time, float64) (*SharedQuotaSnapshot, error)
+	Window(context.Context, *SharedQuotaPolicy, time.Time, time.Time, time.Time, float64) (*SharedQuotaSnapshot, error)
 	GetWindow(context.Context, int64) (*SharedQuotaSnapshot, error)
 }
 
@@ -47,6 +50,18 @@ func (s *SharedQuotaService) Snapshot(ctx context.Context, user *User) (*SharedQ
 	if s == nil || user == nil || user.IsAdmin() {
 		return nil, nil
 	}
+	// 配置保存与账期查询可能来自不同实例；旧配置不能覆盖刚保存的额度。
+	for attempt := 0; attempt < 3; attempt++ {
+		w, err := s.snapshotCurrentPolicy(ctx)
+		if errors.Is(err, ErrSharedQuotaPolicyChanged) {
+			continue
+		}
+		return w, err
+	}
+	return nil, ErrBillingServiceUnavailable.WithCause(ErrSharedQuotaPolicyChanged)
+}
+
+func (s *SharedQuotaService) snapshotCurrentPolicy(ctx context.Context) (*SharedQuotaSnapshot, error) {
 	p, err := s.repo.ActivePolicy(ctx)
 	if err != nil {
 		return nil, ErrBillingServiceUnavailable.WithCause(err)
@@ -62,8 +77,12 @@ func (s *SharedQuotaService) Snapshot(ctx context.Context, user *User) (*SharedQ
 	if err != nil {
 		return nil, ErrBillingServiceUnavailable.WithCause(err)
 	}
-	start, end := c.Window(time.Now(), s.location)
-	w, err := s.repo.Window(ctx, p.PluginKey, start, end, QuantizeUsageBillingAmount(c.DailyQuota))
+	now := time.Now()
+	start, end := c.Window(now, s.location)
+	w, err := s.repo.Window(ctx, p, now, start, end, QuantizeUsageBillingAmount(c.DailyQuota))
+	if errors.Is(err, ErrSharedQuotaPolicyChanged) {
+		return nil, err
+	}
 	if err != nil {
 		return nil, ErrBillingServiceUnavailable.WithCause(err)
 	}

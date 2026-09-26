@@ -187,6 +187,12 @@ const routes: RouteRecordRaw[] = [
 
   // ==================== User Routes ====================
   {
+    path: '/forum',
+    name: 'Forum',
+    component: () => import('@/views/user/ForumView.vue'),
+    meta: { requiresAuth: true, title: 'Forum', titleKey: 'nav.forum' }
+  },
+  {
     path: '/leaderboard',
     name: 'Leaderboard',
     component: () => import('@/views/user/LeaderboardView.vue'),

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '镜像版本（例如 0.2.9，不带 v）'
+        description: '镜像版本（例如 0.3 或 0.3.1，不带 v）'
         required: true
         type: string
 
@@ -25,7 +25,7 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
         run: |
-          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]] || exit 1
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?(-[a-zA-Z0-9.-]+)?$ ]] || exit 1
           echo "app_version=$(cat backend/cmd/server/VERSION)" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3

@@ -786,7 +786,7 @@ func (m *PluginManager) SaveConfig(ctx context.Context, id int64, raw json.RawMe
 		}
 		return nil, fmt.Errorf("加密插件配置: %w", err)
 	}
-	if err := m.repo.UpdateConfig(ctx, id, encrypted, installation.BinarySHA256); err != nil {
+	if err := m.savePluginConfig(ctx, installation, previousConfig, canonical, encrypted); err != nil {
 		if !temporary {
 			err = errors.Join(err, m.restoreRuntimeConfig(id, runtime, previousConfig))
 		}
