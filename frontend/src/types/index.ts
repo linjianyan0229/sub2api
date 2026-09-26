@@ -64,6 +64,8 @@ export interface UserProfileSourceContext {
 }
 
 export interface SharedQuota {
+  group_id?: number
+  group_quota?: { limit: number; used: number; held: number; remaining: number }
   window_id: number
   total: number
   used: number

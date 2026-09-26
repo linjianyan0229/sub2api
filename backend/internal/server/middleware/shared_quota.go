@@ -23,13 +23,16 @@ func sharedQuotaAuth(c *gin.Context, svc *service.APIKeyService, key *service.AP
 	if err == nil && !readOnly {
 		if bound.Status == service.StatusAPIKeyExpired || bound.IsExpired() {
 			status, code, err = http.StatusForbidden, "API_KEY_EXPIRED", service.ErrAPIKeyExpired
-		} else if bound.User.SharedQuota.Remaining <= 0 {
-			status, code, err = http.StatusTooManyRequests, "SHARED_QUOTA_EXHAUSTED", service.ErrSharedQuotaExhausted
+		} else if quotaErr := bound.User.SharedQuota.CheckRemaining(); quotaErr != nil {
+			status, code, err = http.StatusTooManyRequests, "SHARED_QUOTA_EXHAUSTED", quotaErr
+			if errors.Is(err, service.ErrSharedGroupQuotaExhausted) {
+				code = "SHARED_GROUP_QUOTA_EXHAUSTED"
+			}
 		}
 	}
 	if err != nil {
 		message := "共享额度暂时不可用"
-		if errors.Is(err, service.ErrSharedQuotaExhausted) || errors.Is(err, service.ErrAPIKeyExpired) || errors.Is(err, service.ErrGroupNotAllowed) {
+		if errors.Is(err, service.ErrSharedQuotaExhausted) || errors.Is(err, service.ErrSharedGroupQuotaExhausted) || errors.Is(err, service.ErrAPIKeyExpired) || errors.Is(err, service.ErrGroupNotAllowed) {
 			message = err.Error()
 		}
 		if google {

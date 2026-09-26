@@ -10,7 +10,7 @@ import (
 )
 
 const pluginID = "local.sub2api.shared-daily-quota"
-const version = "0.1.3"
+const version = "0.1.4"
 
 type runtime struct {
 	pluginv1.UnimplementedTransportPluginServer

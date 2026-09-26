@@ -59,3 +59,15 @@ func TestDailyResetBoundaryAndDST(t *testing.T) {
 		t.Fatalf("夏令时账期长度应为23小时，得到 %s", b.Sub(a))
 	}
 }
+
+func TestSharedQuotaGroupLimitsValidation(t *testing.T) {
+	for _, groups := range []string{`{"0":10}`, `{"-1":10}`, `{"01":10}`, `{"abc":10}`, `{"1":null}`, `{"1":-1}`, `{"1":10000000001}`, `{"1":"10"}`, `[]`} {
+		if _, err := Parse([]byte(`{"daily_quota":100,"reset_time":"00:00","group_limits":` + groups + `}`)); err == nil {
+			t.Errorf("应拒绝无效分组上限 %s", groups)
+		}
+	}
+	c, err := Parse([]byte(`{"daily_quota":100,"reset_time":"00:00","group_limits":{"1":0,"2":20.5}}`))
+	if err != nil || len(c.GroupLimits) != 2 || c.GroupLimits[1] != 0 || c.GroupLimits[2] != 20.5 {
+		t.Fatalf("分组上限解析错误: %+v %v", c, err)
+	}
+}

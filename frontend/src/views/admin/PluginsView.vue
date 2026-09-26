@@ -609,6 +609,7 @@ async function handleBridgeMessage(event: MessageEvent): Promise<void> {
 
   const requestID = typeof message.request_id === "string" ? message.request_id.trim() : "";
   const expectsResponse =
+    message.type === "groups.list" ||
     message.type === "config.load" ||
     message.type === "config.save" ||
     message.type === "config.test" ||
@@ -626,6 +627,14 @@ async function handleBridgeMessage(event: MessageEvent): Promise<void> {
       case "config.load": {
         const config = await adminAPI.plugins.getConfig(configPlugin.value.id);
         postBridgeResult(message, { ok: true, config });
+        break;
+      }
+      case "groups.list": {
+        if (!configPlugin.value.manifest.capabilities.some(capability => capability.id === "billing.shared_daily_quota.v1")) {
+          throw new Error(t("admin.plugins.bridgeRejected"));
+        }
+        const groups = (await adminAPI.groups.getAllIncludingInactive()).map(({ id, name, platform, status }) => ({ id, name, platform, status }));
+        postBridgeResult(message, { ok: true, groups });
         break;
       }
       case "config.save": {

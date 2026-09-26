@@ -23,12 +23,13 @@ func (r *sharedQuotaTestRepo) ActivePolicy(context.Context) (*SharedQuotaPolicy,
 	r.reads++
 	return r.policy, r.err
 }
-func (r *sharedQuotaTestRepo) Window(_ context.Context, _ *SharedQuotaPolicy, _, _, end time.Time, total float64) (*SharedQuotaSnapshot, error) {
+func (r *sharedQuotaTestRepo) Window(_ context.Context, p *SharedQuotaPolicy, _, _, end time.Time, total float64) (*SharedQuotaSnapshot, error) {
 	if r.windowChanged {
 		r.windowChanged = false
 		return nil, ErrSharedQuotaPolicyChanged
 	}
 	q := r.quota
+	q.GroupID = p.GroupID
 	q.Total = total
 	q.ResetsAt = end
 	return &q, r.err
@@ -45,6 +46,12 @@ func TestSharedQuotaRetriesChangedPolicy(t *testing.T) {
 func (r *sharedQuotaTestRepo) GetWindow(context.Context, int64) (*SharedQuotaSnapshot, error) {
 	q := r.quota
 	return &q, r.err
+}
+
+func (r *sharedQuotaTestRepo) GetGroupWindow(ctx context.Context, id, groupID int64) (*SharedQuotaSnapshot, error) {
+	q, err := r.GetWindow(ctx, id)
+	q.GroupID = groupID
+	return q, err
 }
 
 type sharedQuotaTestEncryptor struct{}
@@ -94,12 +101,13 @@ func TestSharedQuotaFailsClosedAndChecksLiveRemaining(t *testing.T) {
 }
 
 func TestSharedQuotaCommandNeverBillsPersonalSources(t *testing.T) {
-	user := &User{ID: 1, Role: RoleUser, SharedQuota: &SharedQuotaSnapshot{WindowID: 42}}
+	user := &User{ID: 1, Role: RoleUser, SharedQuota: &SharedQuotaSnapshot{WindowID: 42, GroupID: 7}}
 	key := &APIKey{ID: 2, User: user, Quota: 1, RateLimit5h: 1}
 	params := &postUsageBillingParams{User: user, APIKey: key, Account: &Account{ID: 3, Type: AccountTypeOAuth}, Cost: &CostBreakdown{TotalCost: 1.25, ActualCost: 2.5}, Subscription: &UserSubscription{ID: 4}, IsSubscriptionBill: true, SimpleModeKeyRateLimitOnly: true}
 	log := &UsageLog{BillingType: BillingTypeSubscription, SubscriptionID: &params.Subscription.ID}
 	cmd := buildUsageBillingCommand("request", log, params)
 	require.Equal(t, int64(42), cmd.SharedQuotaWindowID)
+	require.Equal(t, int64(7), cmd.SharedQuotaGroupID)
 	require.Equal(t, 2.5, cmd.SharedQuotaCost)
 	require.Zero(t, cmd.BalanceCost)
 	require.Zero(t, cmd.SubscriptionCost)
@@ -134,4 +142,32 @@ func TestSharedQuotaPluginDoesNotDisplaceTransportOrGrantCredentials(t *testing.
 	require.True(t, pluginAccountScopeFromManifest(installation.Manifest).Empty())
 	require.Error(t, manager.validateSharedQuotaConfig(installation, []byte(`{}`)))
 	require.NoError(t, manager.validateSharedQuotaConfig(installation, []byte(`{"daily_quota":0,"reset_time":"00:00"}`)))
+}
+
+func TestSharedQuotaGroupSnapshotKeepsSiteViewAndChecksLiveLimit(t *testing.T) {
+	ctx := context.Background()
+	repo := &sharedQuotaTestRepo{policy: &SharedQuotaPolicy{PluginKey: "test.shared", ConfigEncrypted: `{"daily_quota":100,"reset_time":"00:00","group_limits":{"7":20}}`}, quota: SharedQuotaSnapshot{WindowID: 3, Remaining: 80}}
+	svc, err := NewSharedQuotaService(repo, sharedQuotaTestEncryptor{}, &config.Config{Timezone: "UTC"})
+	require.NoError(t, err)
+	keys := &APIKeyService{sharedQuota: svc}
+	group := int64(7)
+	original := &APIKey{GroupID: &group, User: &User{Role: RoleUser, Balance: 8}}
+	bound, err := keys.BindSharedQuota(ctx, original)
+	require.NoError(t, err)
+	require.Equal(t, group, bound.User.SharedQuota.GroupID)
+	require.Equal(t, 100.0, bound.User.SharedQuota.Total)
+	require.Equal(t, 80.0, bound.User.SharedQuota.Remaining)
+	require.Nil(t, original.User.SharedQuota)
+	view := &User{Role: RoleUser, Balance: 8}
+	require.NoError(t, svc.applyView(ctx, view))
+	require.Equal(t, 80.0, view.Balance)
+	require.Zero(t, view.SharedQuota.GroupID)
+	// 保存更低的分组上限后，旧快照仍需读实时上限，不能绕过限制。
+	repo.quota.GroupQuota = &SharedGroupQuota{Limit: 20, Used: 20}
+	require.ErrorIs(t, svc.Check(ctx, bound.User.SharedQuota), ErrSharedGroupQuotaExhausted)
+	repo.quota.Remaining = 0
+	require.ErrorIs(t, svc.Check(ctx, bound.User.SharedQuota), ErrSharedQuotaExhausted)
+	repo.quota.Remaining = 80
+	repo.quota.GroupQuota = nil
+	require.NoError(t, svc.Check(ctx, bound.User.SharedQuota))
 }

@@ -9,6 +9,7 @@ const {
   enablePlugin,
   savePluginConfig,
   createUISession,
+  listGroups,
   stepUpRun,
 } = vi.hoisted(() => ({
   listPlugins: vi.fn(),
@@ -16,11 +17,13 @@ const {
   enablePlugin: vi.fn(),
   savePluginConfig: vi.fn(),
   createUISession: vi.fn(),
+  listGroups: vi.fn(),
   stepUpRun: vi.fn((action: () => Promise<unknown>) => action()),
 }))
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
+    groups: { getAllIncludingInactive: listGroups },
     plugins: {
       list: listPlugins,
       upload: uploadPlugin,
@@ -130,6 +133,7 @@ describe('管理员插件页二次验证', () => {
     uploadPlugin.mockResolvedValue(plugin)
     enablePlugin.mockResolvedValue(plugin)
     savePluginConfig.mockResolvedValue({ enabled: true })
+    listGroups.mockResolvedValue([{ id: 1, name: '分组一', platform: 'openai', status: 'active', model_pricing: ['private'] }])
     createUISession.mockResolvedValue({
       url: '/api/v1/plugin-ui/token/index.html#bridge_token=bridge',
       bridge_token: 'bridge',
@@ -165,5 +169,29 @@ describe('管理员插件页二次验证', () => {
 
     expect(stepUpRun).toHaveBeenCalledTimes(1)
     expect(uploadPlugin).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([true, false])('分组选择仅向共享额度插件返回最少字段，拥有能力：%s', async (allowed) => {
+    listPlugins.mockResolvedValue([{ ...plugin, manifest: { ...plugin.manifest, capabilities: allowed ? [{ id: 'billing.shared_daily_quota.v1', platform: 'all', account_type: 'all' }] : [] } }])
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('admin.plugins.configure'))!.trigger('click')
+    await flushPromises()
+    const frame = wrapper.get('iframe').element as HTMLIFrameElement
+    // jsdom 中 iframe 未挂到 document，提供等价的消息源以验证 bridge 边界。
+    const frameWindow = { postMessage: vi.fn() }
+    Object.defineProperty(frame, 'contentWindow', { configurable: true, value: frameWindow })
+    const dispatch = (token: string) => window.dispatchEvent(new MessageEvent('message', { source: frameWindow as unknown as Window, origin: 'null', data: { source: 'sub2api-plugin-ui', bridge_token: token, type: 'groups.list', request_id: 'groups-request' } }))
+    dispatch('wrong-token'); await flushPromises()
+    expect(listGroups).not.toHaveBeenCalled()
+    dispatch('bridge'); await flushPromises()
+    if (allowed) {
+      expect(listGroups).toHaveBeenCalledOnce()
+      expect(frameWindow.postMessage).toHaveBeenCalledWith(expect.objectContaining({ ok: true, groups: [{ id: 1, name: '分组一', platform: 'openai', status: 'active' }] }), '*')
+    } else {
+      expect(listGroups).not.toHaveBeenCalled()
+      expect(frameWindow.postMessage).toHaveBeenCalledWith(expect.objectContaining({ ok: false }), '*')
+    }
+    wrapper.unmount()
   })
 })

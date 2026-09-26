@@ -49,11 +49,15 @@ func newSharedQuotaConfigFixture(t *testing.T) *sharedQuotaConfigFixture {
 }
 
 func (f *sharedQuotaConfigFixture) save(t *testing.T, total float64, reset, mode string) {
+	f.saveGroups(t, total, reset, mode, nil)
+}
+
+func (f *sharedQuotaConfigFixture) saveGroups(t *testing.T, total float64, reset, mode string, groups map[int64]float64) {
 	t.Helper()
 	ctx := context.Background()
 	p, err := f.repo.GetByID(ctx, f.plugin.ID)
 	require.NoError(t, err)
-	c := sharedquota.Config{DailyQuota: total, ResetTime: reset, ApplyMode: mode}
+	c := sharedquota.Config{DailyQuota: total, ResetTime: reset, ApplyMode: mode, GroupLimits: groups}
 	raw, err := json.Marshal(c)
 	require.NoError(t, err)
 	update := &service.SharedQuotaConfigUpdate{PluginID: p.ID, Encrypted: string(raw), ExpectedEncrypted: p.ConfigEncrypted, ExpectedBinarySHA256: p.BinarySHA256, Next: c, Now: f.now, Location: f.location}
@@ -72,6 +76,7 @@ func (f *sharedQuotaConfigFixture) snapshot(t *testing.T, now time.Time) *servic
 	c, err := sharedquota.Parse([]byte(p.ConfigEncrypted))
 	require.NoError(t, err)
 	start, end := c.Window(now, f.location)
+	p.GroupLimits = c.GroupLimits
 	q, err := f.shared.Window(ctx, p, now, start, end, c.DailyQuota)
 	require.NoError(t, err)
 	return q
@@ -177,4 +182,84 @@ func TestSharedQuotaConfigConcurrentSaveRejectsStalePolicy(t *testing.T) {
 	require.Zero(t, latest.Remaining)
 	require.Equal(t, 50.0, latest.Used)
 	require.Equal(t, 10.0, latest.Held)
+}
+
+func TestSharedQuotaGroupConfigImmediateAndScheduled(t *testing.T) {
+	f := newSharedQuotaConfigFixture(t)
+	ctx := context.Background()
+	groupA := mustCreateGroup(t, integrationEntClient, &service.Group{Name: "共享上限A-" + uuid.NewString()})
+	groupB := mustCreateGroup(t, integrationEntClient, &service.Group{Name: "共享上限B-" + uuid.NewString()})
+	f.saveGroups(t, 100, "00:00", sharedquota.ApplyImmediately, map[int64]float64{groupA.ID: 10})
+	q := f.snapshot(t, f.now)
+	a, err := f.shared.GetGroupWindow(ctx, q.WindowID, groupA.ID)
+	require.NoError(t, err)
+	require.Equal(t, 100.0, a.Total)
+	require.Equal(t, 10.0, a.GroupQuota.Limit)
+	b, err := f.shared.GetGroupWindow(ctx, q.WindowID, groupB.ID)
+	require.NoError(t, err)
+	require.Nil(t, b.GroupQuota)
+	_, err = integrationDB.ExecContext(ctx, `INSERT INTO shared_quota_group_usage(window_id,group_id,used,held) VALUES($1,$2,5,2),($1,$3,4,0)`, q.WindowID, groupA.ID, groupB.ID)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE shared_quota_windows SET used=9,held=2 WHERE id=$1`, q.WindowID)
+	require.NoError(t, err)
+	// 立即新增、降低、移除上限，都保留分组已用和冻结；未选中的分组仍使用同一共享池。
+	f.saveGroups(t, 100, "00:00", sharedquota.ApplyImmediately, map[int64]float64{groupA.ID: 6, groupB.ID: 3})
+	a, err = f.shared.GetGroupWindow(ctx, q.WindowID, groupA.ID)
+	require.NoError(t, err)
+	require.Equal(t, 89.0, a.Remaining)
+	require.Equal(t, 5.0, a.GroupQuota.Used)
+	require.Equal(t, 2.0, a.GroupQuota.Held)
+	require.Zero(t, a.GroupQuota.Remaining)
+	b, err = f.shared.GetGroupWindow(ctx, q.WindowID, groupB.ID)
+	require.NoError(t, err)
+	require.Zero(t, b.GroupQuota.Remaining)
+	f.saveGroups(t, 100, "00:00", sharedquota.ApplyImmediately, map[int64]float64{groupA.ID: 20})
+	b, err = f.shared.GetGroupWindow(ctx, q.WindowID, groupB.ID)
+	require.NoError(t, err)
+	require.Nil(t, b.GroupQuota)
+	require.Equal(t, a.WindowID, b.WindowID)
+	// 延迟新增 B、移除 A：当前账期保持原配置，下一账期一起切换并重置用量。
+	f.saveGroups(t, 200, "11:00", sharedquota.ApplyNextReset, map[int64]float64{groupB.ID: 30})
+	f.shared = &sharedQuotaRepository{db: integrationDB}
+	current := f.snapshot(t, f.now)
+	a, err = f.shared.GetGroupWindow(ctx, current.WindowID, groupA.ID)
+	require.NoError(t, err)
+	require.Equal(t, 20.0, a.GroupQuota.Limit)
+	require.Equal(t, 13.0, a.GroupQuota.Remaining)
+	b, err = f.shared.GetGroupWindow(ctx, current.WindowID, groupB.ID)
+	require.NoError(t, err)
+	require.Nil(t, b.GroupQuota)
+	next := f.snapshot(t, current.ResetsAt)
+	require.NotEqual(t, current.WindowID, next.WindowID)
+	a, err = f.shared.GetGroupWindow(ctx, next.WindowID, groupA.ID)
+	require.NoError(t, err)
+	require.Nil(t, a.GroupQuota)
+	require.Equal(t, 200.0, a.Remaining)
+	b, err = f.shared.GetGroupWindow(ctx, next.WindowID, groupB.ID)
+	require.NoError(t, err)
+	require.Equal(t, 30.0, b.GroupQuota.Remaining)
+	require.Zero(t, b.GroupQuota.Used)
+	// 旧账期保留用量，供在途任务结算。
+	old, err := f.shared.GetGroupWindow(ctx, current.WindowID, groupA.ID)
+	require.NoError(t, err)
+	require.Equal(t, 5.0, old.GroupQuota.Used)
+}
+
+func TestSharedQuotaConfigRejectsUnknownGroup(t *testing.T) {
+	f := newSharedQuotaConfigFixture(t)
+	ctx := context.Background()
+	f.save(t, 100, "00:00", sharedquota.ApplyImmediately)
+	p, err := f.repo.GetByID(ctx, f.plugin.ID)
+	require.NoError(t, err)
+	previous, err := sharedquota.Parse([]byte(p.ConfigEncrypted))
+	require.NoError(t, err)
+	next := sharedquota.Config{DailyQuota: 200, ResetTime: "00:00", GroupLimits: map[int64]float64{9007199254740991: 10}}
+	raw, err := json.Marshal(next)
+	require.NoError(t, err)
+	err = f.repo.UpdateSharedQuotaConfig(ctx, &service.SharedQuotaConfigUpdate{PluginID: p.ID, Encrypted: string(raw), ExpectedEncrypted: p.ConfigEncrypted, ExpectedBinarySHA256: p.BinarySHA256, Previous: &previous, Next: next, Now: f.now, Location: f.location})
+	require.ErrorIs(t, err, service.ErrGroupNotFound)
+	after, err := f.repo.GetByID(ctx, f.plugin.ID)
+	require.NoError(t, err)
+	require.Equal(t, p.ConfigEncrypted, after.ConfigEncrypted)
+	require.Equal(t, 100.0, f.snapshot(t, f.now).Total)
 }

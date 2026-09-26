@@ -18,6 +18,7 @@ var ErrUsageBillingRequestConflict = errors.New("usage billing request fingerpri
 // UsageBillingCommand describes one billable request that must be applied at most once.
 type UsageBillingCommand struct {
 	SharedQuotaWindowID int64
+	SharedQuotaGroupID  int64
 	SharedQuotaCost     float64
 	RequestID           string
 	APIKeyID            int64
@@ -137,6 +138,9 @@ func buildUsageBillingFingerprint(c *UsageBillingCommand) string {
 	}
 	if c.SharedQuotaWindowID > 0 {
 		raw += fmt.Sprintf("|shared:%d:%0.10f", c.SharedQuotaWindowID, c.SharedQuotaCost)
+		if c.SharedQuotaGroupID > 0 {
+			raw += fmt.Sprintf("|group:%d", c.SharedQuotaGroupID)
+		}
 	}
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])

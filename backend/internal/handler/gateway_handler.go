@@ -2433,6 +2433,9 @@ func extractQuotaResetSeconds(err error) int {
 }
 
 func billingErrorDetails(err error) (status int, code, message string, retryAfter int) {
+	if errors.Is(err, service.ErrSharedGroupQuotaExhausted) {
+		return http.StatusTooManyRequests, "shared_group_quota_exhausted", "该分组每日共享额度上限已用完", 0
+	}
 	if errors.Is(err, service.ErrSharedQuotaExhausted) {
 		return http.StatusTooManyRequests, "shared_quota_exhausted", "全站每日共享额度已用完", 0
 	}

@@ -193,6 +193,11 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 		if err := applySharedQuotaUsage(ctx, tx, cmd.SharedQuotaWindowID, cmd.SharedQuotaCost); err != nil {
 			return err
 		}
+		if cmd.SharedQuotaGroupID > 0 {
+			if err := applySharedGroupUsage(ctx, tx, cmd.SharedQuotaWindowID, cmd.SharedQuotaGroupID, cmd.SharedQuotaCost, 0); err != nil {
+				return err
+			}
+		}
 	}
 	if cmd.SubscriptionCost > 0 && cmd.SubscriptionID != nil {
 		if err := incrementUsageBillingSubscription(ctx, tx, *cmd.SubscriptionID, cmd.SubscriptionCost); err != nil {

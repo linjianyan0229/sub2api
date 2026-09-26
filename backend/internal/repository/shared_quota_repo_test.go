@@ -50,7 +50,7 @@ func TestSharedQuotaBatchSettlementUsesPersistedHold(t *testing.T) {
 	m.ExpectBegin()
 	tx, err := db.Begin()
 	require.NoError(t, err)
-	m.ExpectQuery("SELECT window_id,amount,settled").WithArgs("batch-1").WillReturnRows(sqlmock.NewRows([]string{"window_id", "amount", "settled"}).AddRow(7, 10, false))
+	m.ExpectQuery("SELECT window_id,amount,settled").WithArgs("batch-1").WillReturnRows(sqlmock.NewRows([]string{"window_id", "amount", "settled", "group_id"}).AddRow(7, 10, false, 0))
 	m.ExpectExec(regexp.QuoteMeta("UPDATE shared_quota_windows SET held=held-$1,used=used+$2 WHERE id=$3")).WithArgs(10.0, 4.0, int64(7)).WillReturnResult(sqlmock.NewResult(0, 1))
 	m.ExpectExec("UPDATE shared_quota_batch_holds SET settled=TRUE").WithArgs("batch-1").WillReturnResult(sqlmock.NewResult(0, 1))
 	m.ExpectCommit()
@@ -65,4 +65,19 @@ func TestSharedQuotaBatchSettlementUsesPersistedHold(t *testing.T) {
 func TestSharedQuotaRejectsMixedPersonalCosts(t *testing.T) {
 	err := (&usageBillingRepository{}).applyUsageBillingEffects(context.Background(), nil, &service.UsageBillingCommand{SharedQuotaWindowID: 7, SharedQuotaCost: 1, BalanceCost: 1}, &service.UsageBillingApplyResult{})
 	require.ErrorContains(t, err, "不能同时扣除个人额度")
+}
+
+func TestSharedQuotaGroupFailureRollsBackSiteCharge(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	mock.ExpectBegin()
+	mock.ExpectQuery("INSERT INTO usage_billing_dedup").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+	mock.ExpectQuery("FROM usage_billing_dedup_archive").WillReturnError(sql.ErrNoRows)
+	mock.ExpectExec("UPDATE shared_quota_windows SET used").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO shared_quota_group_usage").WithArgs(int64(7), int64(8), 1.25, 0.0).WillReturnError(errors.New("分组账本不可用"))
+	mock.ExpectRollback()
+	_, err = (&usageBillingRepository{db: db}).Apply(context.Background(), &service.UsageBillingCommand{RequestID: "atomic-group", APIKeyID: 1, UserID: 1, SharedQuotaWindowID: 7, SharedQuotaGroupID: 8, SharedQuotaCost: 1.25})
+	require.ErrorContains(t, err, "分组账本不可用")
+	require.NoError(t, mock.ExpectationsWereMet())
 }

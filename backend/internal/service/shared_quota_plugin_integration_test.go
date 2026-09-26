@@ -97,9 +97,9 @@ func TestSharedQuotaSignedPackageLifecycle(t *testing.T) {
 	require.True(t, enabled.RuntimeHealthy)
 	require.Same(t, route, manager.route.Load())
 	runtime := manager.runtimes[1]
-	updated, err := manager.SaveConfig(ctx, 1, []byte(`{"daily_quota":30,"reset_time":"04:30","apply_mode":"next_reset"}`))
+	updated, err := manager.SaveConfig(ctx, 1, []byte(`{"daily_quota":30,"reset_time":"04:30","apply_mode":"next_reset","group_limits":{"1":10}}`))
 	require.NoError(t, err)
-	require.JSONEq(t, `{"daily_quota":30,"reset_time":"04:30","apply_mode":"next_reset"}`, string(updated))
+	require.JSONEq(t, `{"daily_quota":30,"reset_time":"04:30","apply_mode":"next_reset","group_limits":{"1":10}}`, string(updated))
 	runtime.kill()
 	items, err := repo.List(ctx)
 	require.NoError(t, err)

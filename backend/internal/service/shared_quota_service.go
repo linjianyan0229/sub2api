@@ -11,25 +11,50 @@ import (
 )
 
 var ErrSharedQuotaExhausted = infraerrors.TooManyRequests("SHARED_QUOTA_EXHAUSTED", "全站每日共享额度已用完")
+var ErrSharedGroupQuotaExhausted = infraerrors.TooManyRequests("SHARED_GROUP_QUOTA_EXHAUSTED", "该分组每日共享额度上限已用完")
 
 var ErrSharedQuotaPolicyChanged = errors.New("共享额度配置已变更")
 
 type SharedQuotaSnapshot struct {
-	WindowID  int64     `json:"window_id"`
-	Total     float64   `json:"total"`
-	Used      float64   `json:"used"`
-	Held      float64   `json:"held"`
-	Remaining float64   `json:"remaining"`
-	ResetsAt  time.Time `json:"resets_at"`
-	Timezone  string    `json:"timezone"`
+	WindowID   int64             `json:"window_id"`
+	Total      float64           `json:"total"`
+	Used       float64           `json:"used"`
+	Held       float64           `json:"held"`
+	Remaining  float64           `json:"remaining"`
+	ResetsAt   time.Time         `json:"resets_at"`
+	Timezone   string            `json:"timezone"`
+	GroupID    int64             `json:"group_id,omitempty"`
+	GroupQuota *SharedGroupQuota `json:"group_quota,omitempty"`
 }
 
-type SharedQuotaPolicy struct{ PluginKey, ConfigEncrypted string }
+type SharedGroupQuota struct {
+	Limit     float64 `json:"limit"`
+	Used      float64 `json:"used"`
+	Held      float64 `json:"held"`
+	Remaining float64 `json:"remaining"`
+}
+
+func (q *SharedQuotaSnapshot) CheckRemaining() error {
+	if q.Remaining <= 0 {
+		return ErrSharedQuotaExhausted
+	}
+	if q.GroupQuota != nil && q.GroupQuota.Remaining <= 0 {
+		return ErrSharedGroupQuotaExhausted
+	}
+	return nil
+}
+
+type SharedQuotaPolicy struct {
+	PluginKey, ConfigEncrypted string
+	GroupID                    int64
+	GroupLimits                map[int64]float64
+}
 
 type SharedQuotaRepository interface {
 	ActivePolicy(context.Context) (*SharedQuotaPolicy, error)
 	Window(context.Context, *SharedQuotaPolicy, time.Time, time.Time, time.Time, float64) (*SharedQuotaSnapshot, error)
 	GetWindow(context.Context, int64) (*SharedQuotaSnapshot, error)
+	GetGroupWindow(context.Context, int64, int64) (*SharedQuotaSnapshot, error)
 }
 
 type SharedQuotaService struct {
@@ -47,12 +72,16 @@ func NewSharedQuotaService(repo SharedQuotaRepository, encryptor SecretEncryptor
 }
 
 func (s *SharedQuotaService) Snapshot(ctx context.Context, user *User) (*SharedQuotaSnapshot, error) {
+	return s.snapshotForGroup(ctx, user, 0)
+}
+
+func (s *SharedQuotaService) snapshotForGroup(ctx context.Context, user *User, groupID int64) (*SharedQuotaSnapshot, error) {
 	if s == nil || user == nil || user.IsAdmin() {
 		return nil, nil
 	}
 	// 配置保存与账期查询可能来自不同实例；旧配置不能覆盖刚保存的额度。
 	for attempt := 0; attempt < 3; attempt++ {
-		w, err := s.snapshotCurrentPolicy(ctx)
+		w, err := s.snapshotCurrentPolicy(ctx, groupID)
 		if errors.Is(err, ErrSharedQuotaPolicyChanged) {
 			continue
 		}
@@ -61,7 +90,7 @@ func (s *SharedQuotaService) Snapshot(ctx context.Context, user *User) (*SharedQ
 	return nil, ErrBillingServiceUnavailable.WithCause(ErrSharedQuotaPolicyChanged)
 }
 
-func (s *SharedQuotaService) snapshotCurrentPolicy(ctx context.Context) (*SharedQuotaSnapshot, error) {
+func (s *SharedQuotaService) snapshotCurrentPolicy(ctx context.Context, groupID int64) (*SharedQuotaSnapshot, error) {
 	p, err := s.repo.ActivePolicy(ctx)
 	if err != nil {
 		return nil, ErrBillingServiceUnavailable.WithCause(err)
@@ -78,8 +107,10 @@ func (s *SharedQuotaService) snapshotCurrentPolicy(ctx context.Context) (*Shared
 		return nil, ErrBillingServiceUnavailable.WithCause(err)
 	}
 	now := time.Now()
+	resolved := *p
+	resolved.GroupID, resolved.GroupLimits = groupID, c.GroupLimits
 	start, end := c.Window(now, s.location)
-	w, err := s.repo.Window(ctx, p, now, start, end, QuantizeUsageBillingAmount(c.DailyQuota))
+	w, err := s.repo.Window(ctx, &resolved, now, start, end, QuantizeUsageBillingAmount(c.DailyQuota))
 	if errors.Is(err, ErrSharedQuotaPolicyChanged) {
 		return nil, err
 	}
@@ -97,14 +128,17 @@ func (s *SharedQuotaService) Check(ctx context.Context, snapshot *SharedQuotaSna
 	if s == nil {
 		return ErrBillingServiceUnavailable
 	}
-	w, err := s.repo.GetWindow(ctx, snapshot.WindowID)
+	var w *SharedQuotaSnapshot
+	var err error
+	if snapshot.GroupID > 0 {
+		w, err = s.repo.GetGroupWindow(ctx, snapshot.WindowID, snapshot.GroupID)
+	} else {
+		w, err = s.repo.GetWindow(ctx, snapshot.WindowID)
+	}
 	if err != nil {
 		return ErrBillingServiceUnavailable.WithCause(err)
 	}
-	if w.Remaining <= 0 {
-		return ErrSharedQuotaExhausted
-	}
-	return nil
+	return w.CheckRemaining()
 }
 
 type sharedQuotaContextKey struct{}
@@ -123,7 +157,7 @@ func (s *APIKeyService) BindSharedQuota(ctx context.Context, key *APIKey) (*APIK
 	if s == nil || s.sharedQuota == nil || key == nil || key.User == nil {
 		return key, nil
 	}
-	w, err := s.sharedQuota.Snapshot(ctx, key.User)
+	w, err := s.sharedQuota.snapshotForGroup(ctx, key.User, valueOrZero(key.GroupID))
 	if err != nil {
 		return nil, err
 	}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"strconv"
 	"time"
 )
 
@@ -18,9 +19,10 @@ const (
 )
 
 type Config struct {
-	DailyQuota float64 `json:"daily_quota"`
-	ResetTime  string  `json:"reset_time"`
-	ApplyMode  string  `json:"apply_mode,omitempty"`
+	DailyQuota  float64           `json:"daily_quota"`
+	ResetTime   string            `json:"reset_time"`
+	ApplyMode   string            `json:"apply_mode,omitempty"`
+	GroupLimits map[int64]float64 `json:"group_limits,omitempty"`
 }
 
 func Parse(raw []byte) (Config, error) {
@@ -42,6 +44,22 @@ func Parse(raw []byte) (Config, error) {
 	}
 	if math.IsNaN(c.DailyQuota) || math.IsInf(c.DailyQuota, 0) || c.DailyQuota < 0 || c.DailyQuota > 1e10 {
 		return c, errors.New("每日共享额度必须介于 0 和 10000000000 之间")
+	}
+	if rawGroups, ok := fields["group_limits"]; ok {
+		var groups map[string]json.RawMessage
+		if err := json.Unmarshal(rawGroups, &groups); err != nil {
+			return c, errors.New("分组额度格式无效")
+		}
+		for key, value := range groups {
+			id, err := strconv.ParseInt(key, 10, 64)
+			if err != nil || id <= 0 || strconv.FormatInt(id, 10) != key {
+				return c, errors.New("分组 ID 无效")
+			}
+			amount := c.GroupLimits[id]
+			if bytes.Equal(bytes.TrimSpace(value), []byte("null")) || math.IsNaN(amount) || math.IsInf(amount, 0) || amount < 0 || amount > 1e10 {
+				return c, errors.New("分组每日上限必须介于 0 和 10000000000 之间")
+			}
+		}
 	}
 	t, err := time.Parse("15:04", c.ResetTime)
 	if err != nil || t.Format("15:04") != c.ResetTime {

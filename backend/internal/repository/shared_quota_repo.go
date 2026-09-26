@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"math"
 	"time"
@@ -35,11 +36,27 @@ type sharedQuotaQueryer interface {
 }
 
 func ensureSharedQuotaWindow(ctx context.Context, db sharedQuotaQueryer, key string, start, end time.Time, total float64) (*service.SharedQuotaSnapshot, error) {
+	return ensureSharedQuotaWindowWithGroups(ctx, db, key, start, end, total, nil)
+}
+
+func sharedGroupLimitsJSON(limits map[int64]float64) ([]byte, error) {
+	values := map[int64]float64{}
+	for id, limit := range limits {
+		values[id] = service.QuantizeUsageBillingAmount(limit)
+	}
+	return json.Marshal(values)
+}
+
+func ensureSharedQuotaWindowWithGroups(ctx context.Context, db sharedQuotaQueryer, key string, start, end time.Time, total float64, limits map[int64]float64) (*service.SharedQuotaSnapshot, error) {
+	raw, err := sharedGroupLimitsJSON(limits)
+	if err != nil {
+		return nil, err
+	}
 	// 并发创建只采用首个账期，查询不会修改已存在账期的额度。
 	var w service.SharedQuotaSnapshot
-	err := db.QueryRowContext(ctx, `INSERT INTO shared_quota_windows (plugin_key, starts_at, ends_at, quota)
-	VALUES ($1,$2,$3,$4) ON CONFLICT (plugin_key, starts_at) DO UPDATE SET plugin_key = EXCLUDED.plugin_key
-	RETURNING `+sharedQuotaColumns, key, start, end, total).Scan(&w.WindowID, &w.Total, &w.Used, &w.Held, &w.Remaining, &w.ResetsAt)
+	err = db.QueryRowContext(ctx, `INSERT INTO shared_quota_windows (plugin_key, starts_at, ends_at, quota, group_limits)
+	VALUES ($1,$2,$3,$4,$5) ON CONFLICT (plugin_key, starts_at) DO UPDATE SET plugin_key = EXCLUDED.plugin_key
+	RETURNING `+sharedQuotaColumns, key, start, end, total, string(raw)).Scan(&w.WindowID, &w.Total, &w.Used, &w.Held, &w.Remaining, &w.ResetsAt)
 	return &w, err
 }
 
@@ -86,7 +103,13 @@ func (r *sharedQuotaRepository) Window(ctx context.Context, policy *service.Shar
 		return nil, err
 	}
 	if w == nil {
-		w, err = ensureSharedQuotaWindow(ctx, tx, policy.PluginKey, start, end, total)
+		w, err = ensureSharedQuotaWindowWithGroups(ctx, tx, policy.PluginKey, start, end, total, policy.GroupLimits)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if policy.GroupID > 0 {
+		w, err = sharedQuotaGroupWindow(ctx, tx, w.WindowID, policy.GroupID)
 		if err != nil {
 			return nil, err
 		}
@@ -116,6 +139,15 @@ func (r *pluginRepository) UpdateSharedQuotaConfig(ctx context.Context, update *
 	if encrypted != update.ExpectedEncrypted || binary != update.ExpectedBinarySHA256 {
 		return service.ErrPluginStateChanged
 	}
+	if len(update.Next.GroupLimits) > 0 {
+		ids := make([]int64, 0, len(update.Next.GroupLimits))
+		for id := range update.Next.GroupLimits {
+			ids = append(ids, id)
+		}
+		if err := lockLiveGroups(ctx, tx, ids); err != nil {
+			return err
+		}
+	}
 	w, err := currentSharedQuotaWindow(ctx, tx, key, update.Now)
 	if err != nil {
 		return err
@@ -126,7 +158,7 @@ func (r *pluginRepository) UpdateSharedQuotaConfig(ctx context.Context, update *
 			initial = *update.Previous
 		}
 		start, end := initial.Window(update.Now, update.Location)
-		w, err = ensureSharedQuotaWindow(ctx, tx, key, start, end, service.QuantizeUsageBillingAmount(initial.DailyQuota))
+		w, err = ensureSharedQuotaWindowWithGroups(ctx, tx, key, start, end, service.QuantizeUsageBillingAmount(initial.DailyQuota), initial.GroupLimits)
 		if err != nil {
 			return err
 		}
@@ -134,6 +166,13 @@ func (r *pluginRepository) UpdateSharedQuotaConfig(ctx context.Context, update *
 	total := w.Total
 	if update.Previous == nil || update.Next.ApplyMode != sharedquota.ApplyNextReset {
 		total = service.QuantizeUsageBillingAmount(update.Next.DailyQuota)
+		raw, err := sharedGroupLimitsJSON(update.Next.GroupLimits)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE shared_quota_windows SET group_limits=$2 WHERE id=$1`, w.WindowID, string(raw)); err != nil {
+			return err
+		}
 	}
 	_, nextReset := update.Next.Window(update.Now, update.Location)
 	// 修改刷新时间保留当前用量，以新时间的下一次到点作为账期结束。
@@ -150,6 +189,33 @@ func (r *sharedQuotaRepository) GetWindow(ctx context.Context, id int64) (*servi
 	var w service.SharedQuotaSnapshot
 	err := r.db.QueryRowContext(ctx, `SELECT `+sharedQuotaColumns+` FROM shared_quota_windows WHERE id=$1`, id).Scan(&w.WindowID, &w.Total, &w.Used, &w.Held, &w.Remaining, &w.ResetsAt)
 	return &w, err
+}
+
+func (r *sharedQuotaRepository) GetGroupWindow(ctx context.Context, id, groupID int64) (*service.SharedQuotaSnapshot, error) {
+	return sharedQuotaGroupWindow(ctx, r.db, id, groupID)
+}
+
+func sharedQuotaGroupWindow(ctx context.Context, db sharedQuotaQueryer, id, groupID int64) (*service.SharedQuotaSnapshot, error) {
+	w := service.SharedQuotaSnapshot{GroupID: groupID}
+	var limit *float64
+	var used, held float64
+	err := db.QueryRowContext(ctx, `SELECT w.id,w.quota,w.used,w.held,GREATEST(0,w.quota-w.used-w.held),w.ends_at,
+        (w.group_limits->>($2::bigint)::text)::numeric,COALESCE(g.used,0),COALESCE(g.held,0)
+        FROM shared_quota_windows w LEFT JOIN shared_quota_group_usage g ON g.window_id=w.id AND g.group_id=$2
+        WHERE w.id=$1`, id, groupID).Scan(&w.WindowID, &w.Total, &w.Used, &w.Held, &w.Remaining, &w.ResetsAt, &limit, &used, &held)
+	if err != nil {
+		return nil, err
+	}
+	if limit != nil {
+		w.GroupQuota = &service.SharedGroupQuota{Limit: *limit, Used: used, Held: held, Remaining: math.Max(0, service.QuantizeUsageBillingAmount(*limit-used-held))}
+	}
+	return &w, nil
+}
+
+func applySharedGroupUsage(ctx context.Context, tx *sql.Tx, window, group int64, used, held float64) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO shared_quota_group_usage(window_id,group_id,used,held) VALUES($1,$2,$3,$4)
+        ON CONFLICT(window_id,group_id) DO UPDATE SET used=shared_quota_group_usage.used+$3,held=shared_quota_group_usage.held+$4`, window, group, used, held)
+	return err
 }
 
 func applySharedQuotaUsage(ctx context.Context, tx *sql.Tx, id int64, amount float64) error {
@@ -183,7 +249,20 @@ func reserveSharedQuotaBatch(ctx context.Context, tx *sql.Tx, cmd *service.Batch
 	if n != 1 {
 		return nil, service.ErrBatchImageInsufficientBalance
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO shared_quota_batch_holds (batch_id,window_id,amount) VALUES ($1,$2,$3)`, cmd.BatchID, q.WindowID, amount)
+	if q.GroupID > 0 {
+		// 全站行锁之后读取分组实时上限；任一冻结失败会回滚整个事务。
+		current, err := sharedQuotaGroupWindow(ctx, tx, q.WindowID, q.GroupID)
+		if err != nil {
+			return nil, err
+		}
+		if current.GroupQuota != nil && current.GroupQuota.Remaining < amount {
+			return nil, service.ErrBatchImageInsufficientBalance
+		}
+		if err := applySharedGroupUsage(ctx, tx, q.WindowID, q.GroupID, 0, amount); err != nil {
+			return nil, err
+		}
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO shared_quota_batch_holds (batch_id,window_id,amount,group_id) VALUES ($1,$2,$3,$4)`, cmd.BatchID, q.WindowID, amount, q.GroupID)
 	return &service.BatchImageBalanceHoldResult{}, err
 }
 
@@ -192,7 +271,8 @@ func settleSharedQuotaBatch(ctx context.Context, tx *sql.Tx, cmd *service.BatchI
 	var window int64
 	var held float64
 	var settled bool
-	err := tx.QueryRowContext(ctx, `SELECT window_id,amount,settled FROM shared_quota_batch_holds WHERE batch_id=$1 FOR UPDATE`, cmd.BatchID).Scan(&window, &held, &settled)
+	var groupID int64
+	err := tx.QueryRowContext(ctx, `SELECT window_id,amount,settled,group_id FROM shared_quota_batch_holds WHERE batch_id=$1 FOR UPDATE`, cmd.BatchID).Scan(&window, &held, &settled, &groupID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -216,20 +296,33 @@ func settleSharedQuotaBatch(ctx context.Context, tx *sql.Tx, cmd *service.BatchI
 	if err != nil {
 		return nil, true, err
 	}
+	if groupID > 0 {
+		result, err := tx.ExecContext(ctx, `UPDATE shared_quota_group_usage SET held=held-$1,used=used+$2 WHERE window_id=$3 AND group_id=$4`, held, actual, window, groupID)
+		if err != nil {
+			return nil, true, err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return nil, true, err
+		}
+		if rows != 1 {
+			return nil, true, errors.New("共享额度分组冻结记录不存在")
+		}
+	}
 	_, err = tx.ExecContext(ctx, `UPDATE shared_quota_batch_holds SET settled=TRUE WHERE batch_id=$1`, cmd.BatchID)
 	return &service.BatchImageBalanceHoldResult{}, true, err
 }
 
 func (r *usageBillingRepository) BatchSharedQuota(ctx context.Context, batchID string) (*service.SharedQuotaSnapshot, error) {
-	var id int64
-	err := r.db.QueryRowContext(ctx, `SELECT window_id FROM shared_quota_batch_holds WHERE batch_id=$1`, batchID).Scan(&id)
+	var id, groupID int64
+	err := r.db.QueryRowContext(ctx, `SELECT window_id,group_id FROM shared_quota_batch_holds WHERE batch_id=$1`, batchID).Scan(&id, &groupID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return (&sharedQuotaRepository{db: r.db}).GetWindow(ctx, id)
+	return sharedQuotaGroupWindow(ctx, r.db, id, groupID)
 }
 
 func (r *usageBillingRepository) StoreMediaBillingSnapshot(ctx context.Context, key string, payload []byte) error {

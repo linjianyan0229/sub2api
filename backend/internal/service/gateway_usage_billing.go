@@ -319,6 +319,7 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 
 	if p.User.SharedQuota != nil && !p.User.IsAdmin() {
 		cmd.SharedQuotaWindowID = p.User.SharedQuota.WindowID
+		cmd.SharedQuotaGroupID = p.User.SharedQuota.GroupID
 		cmd.SharedQuotaCost = p.Cost.ActualCost
 		cmd.BillingType = BillingTypeSharedQuota
 		cmd.SubscriptionID = nil

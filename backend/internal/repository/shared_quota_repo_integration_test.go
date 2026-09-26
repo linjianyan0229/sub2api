@@ -99,3 +99,95 @@ func TestSharedQuotaRepositoryConcurrentBillingAndBatchSettlement(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, 37.0, q.Used)
 }
+
+func TestSharedQuotaGroupBillingAndAtomicHolds(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := &usageBillingRepository{db: integrationDB}
+	shared := &sharedQuotaRepository{db: integrationDB}
+	start := time.Now().UTC()
+	q, err := ensureSharedQuotaWindowWithGroups(ctx, integrationDB, "test.groups."+uuid.NewString(), start, start.Add(24*time.Hour), 100, map[int64]float64{7: 20})
+	require.NoError(t, err)
+	user := mustCreateUser(t, client, &service.User{Email: uuid.NewString() + "@example.com", PasswordHash: "hash", Balance: 20})
+	key := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: "sk-" + uuid.NewString(), Name: "group-shared", Quota: 1})
+	var wg sync.WaitGroup
+	results := make(chan error, 20)
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			group := int64(7 + i%2)
+			cmd := &service.UsageBillingCommand{RequestID: uuid.NewString(), APIKeyID: key.ID, UserID: user.ID, SharedQuotaWindowID: q.WindowID, SharedQuotaGroupID: group, SharedQuotaCost: 1.25, BillingType: service.BillingTypeSharedQuota}
+			_, e := repo.Apply(ctx, cmd)
+			if e == nil {
+				_, e = repo.Apply(ctx, cmd)
+			}
+			results <- e
+		}(i)
+	}
+	wg.Wait()
+	close(results)
+	for err := range results {
+		require.NoError(t, err)
+	}
+	a, err := shared.GetGroupWindow(ctx, q.WindowID, 7)
+	require.NoError(t, err)
+	require.Equal(t, 25.0, a.Used)
+	require.Equal(t, 12.5, a.GroupQuota.Used)
+	require.Equal(t, 7.5, a.GroupQuota.Remaining)
+	b, err := shared.GetGroupWindow(ctx, q.WindowID, 8)
+	require.NoError(t, err)
+	require.Nil(t, b.GroupQuota)
+	require.Equal(t, 75.0, b.Remaining)
+	// 并发冻结必须同时满足共享池和分组上限，失败不得留下全站冻结金额。
+	holds := make(chan *service.BatchImageBalanceHoldCommand, 8)
+	holdErrors := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cmd := &service.BatchImageBalanceHoldCommand{RequestID: uuid.NewString(), APIKeyID: key.ID, UserID: user.ID, BatchID: uuid.NewString(), HoldAmount: 2}
+			_, e := repo.ReserveBatchImageBalance(service.WithSharedQuota(ctx, a), cmd)
+			if e == nil {
+				holds <- cmd
+			}
+			holdErrors <- e
+		}()
+	}
+	wg.Wait()
+	close(holds)
+	close(holdErrors)
+	for err := range holdErrors {
+		if err != nil {
+			require.ErrorIs(t, err, service.ErrBatchImageInsufficientBalance)
+		}
+	}
+	require.Len(t, holds, 3)
+	a, err = shared.GetGroupWindow(ctx, q.WindowID, 7)
+	require.NoError(t, err)
+	require.Equal(t, 6.0, a.Held)
+	require.Equal(t, 6.0, a.GroupQuota.Held)
+	// 不带请求上下文，仍按持久化的原分组结算；重复提交不重复扣费。
+	for hold := range holds {
+		persisted, err := repo.BatchSharedQuota(ctx, hold.BatchID)
+		require.NoError(t, err)
+		require.Equal(t, int64(7), persisted.GroupID)
+		hold.RequestID = uuid.NewString()
+		hold.RequestFingerprint = ""
+		hold.ActualAmount = 1
+		_, err = repo.CaptureBatchImageBalance(ctx, hold)
+		require.NoError(t, err)
+		_, err = repo.CaptureBatchImageBalance(ctx, hold)
+		require.NoError(t, err)
+	}
+	a, err = shared.GetGroupWindow(ctx, q.WindowID, 7)
+	require.NoError(t, err)
+	require.Equal(t, 28.0, a.Used)
+	require.Equal(t, 15.5, a.GroupQuota.Used)
+	require.Zero(t, a.Held)
+	require.Zero(t, a.GroupQuota.Held)
+	var balance, quotaUsed float64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT u.balance,k.quota_used FROM users u JOIN api_keys k ON k.user_id=u.id WHERE k.id=$1`, key.ID).Scan(&balance, &quotaUsed))
+	require.Equal(t, 20.0, balance)
+	require.Zero(t, quotaUsed)
+}

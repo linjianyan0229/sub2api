@@ -18,15 +18,20 @@ import (
 
 type sharedAuthRepo struct {
 	service.SharedQuotaRepository
-	remaining float64
-	err       error
+	remaining      float64
+	err            error
+	groupExhausted bool
 }
 
 func (r *sharedAuthRepo) ActivePolicy(context.Context) (*service.SharedQuotaPolicy, error) {
 	return &service.SharedQuotaPolicy{PluginKey: "test.shared", ConfigEncrypted: `{"daily_quota":100,"reset_time":"00:00"}`}, r.err
 }
 func (r *sharedAuthRepo) Window(context.Context, *service.SharedQuotaPolicy, time.Time, time.Time, time.Time, float64) (*service.SharedQuotaSnapshot, error) {
-	return &service.SharedQuotaSnapshot{WindowID: 1, Total: 100, Remaining: r.remaining}, r.err
+	q := &service.SharedQuotaSnapshot{WindowID: 1, Total: 100, Remaining: r.remaining}
+	if r.groupExhausted {
+		q.GroupQuota = &service.SharedGroupQuota{Limit: 10, Used: 10}
+	}
+	return q, r.err
 }
 
 type sharedAuthEncryptor struct{}
@@ -40,10 +45,13 @@ func TestSharedQuotaAuthBypassesOnlyPersonalBilling(t *testing.T) {
 		name, role, status, path, ip string
 		remaining                    float64
 		expired, offline             bool
+		groupExhausted               bool
 		want                         int
 	}{
 		{name: "普通用户忽略零余额和已耗尽Key", role: service.RoleUser, status: service.StatusAPIKeyQuotaExhausted, path: "/v1/messages", remaining: 100, want: 200},
 		{name: "共享池耗尽", role: service.RoleUser, status: service.StatusActive, path: "/v1/messages", want: 429},
+		{name: "分组上限耗尽不回落个人计费", role: service.RoleUser, status: service.StatusActive, path: "/v1/messages", remaining: 100, groupExhausted: true, want: 429},
+		{name: "分组上限耗尽仍显示共享额度", role: service.RoleUser, status: service.StatusActive, path: "/v1/usage", remaining: 100, groupExhausted: true, want: 200},
 		{name: "额度耗尽仍可查询", role: service.RoleUser, status: service.StatusActive, path: "/v1/usage", want: 200},
 		{name: "额度耗尽仍可查询视频", role: service.RoleUser, status: service.StatusActive, path: "/v1/videos/task-1", want: 200},
 		{name: "管理员仍受个人余额策略约束", role: service.RoleAdmin, status: service.StatusActive, path: "/v1/messages", remaining: 100, want: 403},
@@ -67,7 +75,7 @@ func TestSharedQuotaAuthBypassesOnlyPersonalBilling(t *testing.T) {
 				key.IPWhitelist = []string{tc.ip}
 			}
 			repo := &stubApiKeyRepo{getByKey: func(context.Context, string) (*service.APIKey, error) { return key, nil }}
-			quotaRepo := &sharedAuthRepo{remaining: tc.remaining}
+			quotaRepo := &sharedAuthRepo{remaining: tc.remaining, groupExhausted: tc.groupExhausted}
 			if tc.offline {
 				quotaRepo.err = errors.New("offline")
 			}
