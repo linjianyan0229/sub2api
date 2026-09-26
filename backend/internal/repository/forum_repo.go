@@ -14,6 +14,11 @@ type forumRepository struct{ db *sql.DB }
 
 func NewForumRepository(db *sql.DB) service.ForumRepository { return &forumRepository{db: db} }
 
+const forumRankSelect = `WITH top AS (SELECT t.user_id,ROW_NUMBER() OVER (ORDER BY t.actual_cost DESC,t.tokens DESC,t.user_id ASC) AS rank
+    FROM user_usage_lifetime_totals t JOIN users u ON u.id=t.user_id AND u.deleted_at IS NULL
+    WHERE t.actual_cost>0 OR t.tokens>0 ORDER BY t.actual_cost DESC,t.tokens DESC,t.user_id ASC LIMIT 20)
+    SELECT COALESCE((SELECT rank FROM top WHERE user_id=$1),0)`
+
 const forumMessageSelect = `SELECT m.id,COALESCE(u.id,0),COALESCE(u.username,''),COALESCE(a.url,''),COALESCE(t.actual_cost,0),
     m.content,m.rank_at_send,m.pinned,m.created_at FROM forum_messages m
     LEFT JOIN users u ON u.id=m.user_id AND u.deleted_at IS NULL
@@ -118,10 +123,7 @@ func (r *forumRepository) Create(ctx context.Context, user int64, content string
 			return service.ErrForumTooFast
 		}
 		var rank int
-		err = tx.QueryRowContext(ctx, `WITH top AS (SELECT t.user_id,ROW_NUMBER() OVER (ORDER BY t.actual_cost DESC,t.tokens DESC,t.user_id ASC) AS rank
-            FROM user_usage_lifetime_totals t JOIN users u ON u.id=t.user_id AND u.deleted_at IS NULL
-            WHERE t.actual_cost>0 OR t.tokens>0 ORDER BY t.actual_cost DESC,t.tokens DESC,t.user_id ASC LIMIT 20)
-            SELECT COALESCE((SELECT rank FROM top WHERE user_id=$1),0)`, user).Scan(&rank)
+		err = tx.QueryRowContext(ctx, forumRankSelect, user).Scan(&rank)
 		if err != nil {
 			return err
 		}
@@ -140,25 +142,60 @@ func (r *forumRepository) Create(ctx context.Context, user int64, content string
 	})
 	return &m, err
 }
+func (r *forumRepository) Arrive(ctx context.Context, user int64, session string) error {
+	return r.mutation(ctx, user, false, func(tx *sql.Tx, now time.Time, _ bool, _ *time.Time) error {
+		var exists bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM forum_arrivals WHERE user_id=$1 AND session_id=$2)`, user, session).Scan(&exists); err != nil || exists {
+			return err
+		}
+		var rank int
+		if err := tx.QueryRowContext(ctx, forumRankSelect, user).Scan(&rank); err != nil {
+			return err
+		}
+		var id int64
+		if err := tx.QueryRowContext(ctx, `INSERT INTO forum_arrivals(user_id,session_id,rank_at_arrival,created_at) VALUES($1,$2,$3,$4) RETURNING id`, user, session, rank, now).Scan(&id); err != nil {
+			return err
+		}
+		// 与写入共用同一行锁，避免并发会话提交顺序导致客户端漏读。
+		_, err := tx.ExecContext(ctx, `UPDATE forum_settings SET last_arrival_id=$1 WHERE id=1`, id)
+		return err
+	})
+}
 func (r *forumRepository) Events(ctx context.Context, after *int64) (*service.ForumEvents, error) {
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	result := &service.ForumEvents{Messages: []service.ForumMessage{}}
-	if err = tx.QueryRowContext(ctx, `SELECT last_message_id FROM forum_settings WHERE id=1`).Scan(&result.Cursor); err != nil {
+	result := &service.ForumEvents{Arrivals: []service.ForumArrival{}}
+	if err = tx.QueryRowContext(ctx, `SELECT last_arrival_id FROM forum_settings WHERE id=1`).Scan(&result.Cursor); err != nil {
 		return nil, err
 	}
-	// 首次连接只建立游标，不把历史发言当成全站通报。
+	// 首次连接只建立游标，不重播之前的上线记录。
 	if after != nil {
-		result.Messages, err = forumMessages(ctx, tx, `WHERE m.id>$1 AND m.id<=$2 AND m.rank_at_send>0 AND u.id IS NOT NULL
-            AND m.created_at>NOW()-INTERVAL '30 seconds' ORDER BY m.id LIMIT 20`, *after, result.Cursor)
+		rows, err := tx.QueryContext(ctx, `SELECT e.id,u.id,u.username,COALESCE(a.url,''),COALESCE(t.actual_cost,0),e.rank_at_arrival,e.created_at
+            FROM forum_arrivals e JOIN users u ON u.id=e.user_id AND u.deleted_at IS NULL AND u.status='active'
+            LEFT JOIN user_avatars a ON a.user_id=u.id
+            LEFT JOIN user_usage_lifetime_totals t ON t.user_id=u.id
+            WHERE e.id>$1 AND e.id<=$2 AND e.rank_at_arrival>0
+            AND e.created_at>NOW()-INTERVAL '30 seconds' ORDER BY e.id LIMIT 20`, *after, result.Cursor)
 		if err != nil {
 			return nil, err
 		}
-		if len(result.Messages) == 20 {
-			result.Cursor = result.Messages[19].ID
+		defer rows.Close()
+		for rows.Next() {
+			var event service.ForumArrival
+			if err := rows.Scan(&event.ID, &event.Author.UserID, &event.Author.Username, &event.Author.AvatarURL, &event.Author.ActualCost, &event.Rank, &event.CreatedAt); err != nil {
+				return nil, err
+			}
+			event.Author.Username = service.ForumDisplayName(event.Author.Username)
+			result.Arrivals = append(result.Arrivals, event)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		if len(result.Arrivals) == 20 {
+			result.Cursor = result.Arrivals[19].ID
 		}
 	}
 	return result, tx.Commit()

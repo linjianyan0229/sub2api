@@ -15,14 +15,48 @@ import (
 
 type forumHandlerRepo struct {
 	service.ForumRepository
-	user  int64
-	calls int
+	user    int64
+	calls   int
+	session string
+}
+
+func (r *forumHandlerRepo) Arrive(_ context.Context, user int64, session string) error {
+	r.user = user
+	r.session = session
+	r.calls++
+	return nil
 }
 
 func (r *forumHandlerRepo) Create(_ context.Context, user int64, content string) (*service.ForumMessage, error) {
 	r.user = user
 	r.calls++
 	return &service.ForumMessage{Content: content}, nil
+}
+
+func TestForumArrivalUsesAuthenticatedSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &forumHandlerRepo{}
+	h := NewForumHandler(service.NewForumService(repo))
+	call := func(authenticated bool, session string) int {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, "/forum/arrival", strings.NewReader(`{"user_id":1,"session_id":"forged"}`))
+		c.Request.Header.Set("Content-Type", "application/json")
+		if authenticated {
+			c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 42})
+			c.Set(middleware.ContextKeySessionID, session)
+		}
+		h.Arrive(c)
+		return w.Code
+	}
+	require.Equal(t, 401, call(false, ""))
+	require.Zero(t, repo.calls)
+	require.Equal(t, 200, call(true, "verified-session"))
+	require.Equal(t, int64(42), repo.user)
+	require.Equal(t, "verified-session", repo.session)
+	require.Equal(t, 1, repo.calls)
+	require.Equal(t, 200, call(true, ""))
+	require.Equal(t, 1, repo.calls)
 }
 func TestForumHandlerUsesAuthenticatedIdentity(t *testing.T) {
 	gin.SetMode(gin.TestMode)

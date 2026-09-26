@@ -29,6 +29,7 @@ func RegisterUserRoutes(
 		forum.GET("", h.Forum.Page)
 		forum.POST("/messages", h.Forum.Create)
 		forum.GET("/events", h.Forum.Events)
+		forum.POST("/arrival", h.Forum.Arrive)
 
 		// 用户接口
 		user := authenticated.Group("/user")

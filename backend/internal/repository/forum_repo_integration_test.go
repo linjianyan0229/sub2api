@@ -48,7 +48,7 @@ func TestForumPermissionsLifecycleAndEvents(t *testing.T) {
 	require.NoError(t, err)
 	initial, err := repo.Events(ctx, nil)
 	require.NoError(t, err)
-	require.Empty(t, initial.Messages)
+	require.Empty(t, initial.Arrivals)
 	m, err := repo.Create(ctx, user, "<script>alert(1)</script>")
 	require.NoError(t, err)
 	require.Equal(t, 1, m.Rank)
@@ -59,19 +59,19 @@ func TestForumPermissionsLifecycleAndEvents(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrForumTooFast)
 	events, err := repo.Events(ctx, &initial.Cursor)
 	require.NoError(t, err)
-	require.Len(t, events.Messages, 1)
-	require.Equal(t, m.ID, events.Messages[0].ID)
+	require.Empty(t, events.Arrivals)
+	require.Equal(t, initial.Cursor, events.Cursor)
 	again, err := repo.Events(ctx, &events.Cursor)
 	require.NoError(t, err)
-	require.Empty(t, again.Messages)
+	require.Empty(t, again.Arrivals)
 	fresh, err := repo.Events(ctx, nil)
 	require.NoError(t, err)
-	require.Empty(t, fresh.Messages)
+	require.Empty(t, fresh.Arrivals)
 	_, err = repo.Create(ctx, ids[21], "榜外用户")
 	require.NoError(t, err)
 	other, err := repo.Events(ctx, &events.Cursor)
 	require.NoError(t, err)
-	require.Empty(t, other.Messages)
+	require.Empty(t, other.Arrivals)
 
 	minutes, days := 10, 7
 	require.ErrorIs(t, repo.UpdateSettings(ctx, user, &minutes, nil), service.ErrForumAdmin)
@@ -127,7 +127,7 @@ func TestForumPermissionsLifecycleAndEvents(t *testing.T) {
 	require.Empty(t, page.Messages)
 	afterClear, err := repo.Events(ctx, &beforeClear.Cursor)
 	require.NoError(t, err)
-	require.Empty(t, afterClear.Messages)
+	require.Empty(t, afterClear.Arrivals)
 	require.Equal(t, beforeClear.Cursor, afterClear.Cursor)
 	_, err = repo.Create(ctx, ids[4], "清空不解除禁言")
 	require.ErrorIs(t, err, service.ErrForumMuted)
@@ -136,10 +136,10 @@ func TestForumPermissionsLifecycleAndEvents(t *testing.T) {
 	require.Equal(t, 1000000.0, total)
 	next, err := repo.Create(ctx, ids[5], "清空后新发言")
 	require.NoError(t, err)
-	require.Greater(t, next.ID, beforeClear.Cursor)
+	require.Greater(t, next.ID, m.ID)
 	after, err := repo.Events(ctx, &beforeClear.Cursor)
 	require.NoError(t, err)
-	require.Len(t, after.Messages, 1)
+	require.Empty(t, after.Arrivals)
 
 	// 同一用户同时提交只有一次成功；置顶总数在并发操作下也不得突破上限。
 	var wg sync.WaitGroup
@@ -188,4 +188,88 @@ func TestForumPermissionsLifecycleAndEvents(t *testing.T) {
 	var count int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM forum_messages WHERE id=$1`, next.ID).Scan(&count))
 	require.Equal(t, 1, count)
+}
+
+func TestForumArrivalsDeduplicateSessions(t *testing.T) {
+	ctx := context.Background()
+	repo := &forumRepository{db: integrationDB}
+	users := newUserRepositoryWithSQL(integrationEntClient, integrationDB)
+	user := &service.User{Email: uuid.NewString() + "@forum.test", Username: "private@example.com", PasswordHash: "hash", Role: "user", Status: "active", Concurrency: 5}
+	require.NoError(t, users.Create(ctx, user))
+	t.Cleanup(func() {
+		_, err := integrationDB.ExecContext(ctx, `DELETE FROM users WHERE id=$1`, user.ID)
+		require.NoError(t, err)
+	})
+	initial, err := repo.Events(ctx, nil)
+	require.NoError(t, err)
+	// 榜外用户上线不广播，在线期间进入榜单也不追补通报。
+	require.NoError(t, repo.Arrive(ctx, user.ID, "unranked"))
+	_, err = integrationDB.ExecContext(ctx, `INSERT INTO user_usage_lifetime_totals(user_id,actual_cost,tokens) VALUES($1,10000000,100)`, user.ID)
+	require.NoError(t, err)
+	require.NoError(t, repo.Arrive(ctx, user.ID, "unranked"))
+	events, err := repo.Events(ctx, &initial.Cursor)
+	require.NoError(t, err)
+	require.Empty(t, events.Arrivals)
+	// 多标签、刷新、网络重试以及不同服务实例同时登记同一会话，只生成一条事件。
+	var wg sync.WaitGroup
+	results := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			other := &forumRepository{db: integrationDB}
+			results <- other.Arrive(ctx, user.ID, "session-one")
+		}()
+	}
+	wg.Wait()
+	close(results)
+	for err := range results {
+		require.NoError(t, err)
+	}
+	events, err = repo.Events(ctx, &events.Cursor)
+	require.NoError(t, err)
+	require.Len(t, events.Arrivals, 1)
+	event := events.Arrivals[0]
+	require.Equal(t, user.ID, event.Author.UserID)
+	require.Equal(t, 1, event.Rank)
+	require.Empty(t, event.Author.Username)
+	require.Equal(t, 10000000.0, event.Author.ActualCost)
+	_, err = repo.Create(ctx, user.ID, "发言不再触发")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := integrationDB.ExecContext(ctx, `DELETE FROM forum_messages WHERE user_id=$1`, user.ID)
+		require.NoError(t, err)
+	})
+	require.NoError(t, repo.Arrive(ctx, user.ID, "session-one"))
+	again, err := repo.Events(ctx, &events.Cursor)
+	require.NoError(t, err)
+	require.Empty(t, again.Arrivals)
+	require.Equal(t, events.Cursor, again.Cursor)
+	fresh, err := repo.Events(ctx, nil)
+	require.NoError(t, err)
+	require.Empty(t, fresh.Arrivals)
+	// 通报过期仍保留去重记录，新登录会话才产生新的通报。
+	_, err = integrationDB.ExecContext(ctx, `UPDATE forum_arrivals SET created_at=NOW()-INTERVAL '60 seconds' WHERE id=$1`, event.ID)
+	require.NoError(t, err)
+	require.NoError(t, repo.Arrive(ctx, user.ID, "session-one"))
+	expired, err := repo.Events(ctx, &initial.Cursor)
+	require.NoError(t, err)
+	require.Empty(t, expired.Arrivals)
+	require.NoError(t, repo.Arrive(ctx, user.ID, "session-two"))
+	next, err := repo.Events(ctx, &events.Cursor)
+	require.NoError(t, err)
+	require.Len(t, next.Arrivals, 1)
+	require.Greater(t, next.Arrivals[0].ID, event.ID)
+	// 连续事件分页不漏读；客户端只看到公开资料，永远不返回会话 ID。
+	for i := 0; i < 21; i++ {
+		require.NoError(t, repo.Arrive(ctx, user.ID, fmt.Sprintf("session-%d", i)))
+	}
+	page, err := repo.Events(ctx, &next.Cursor)
+	require.NoError(t, err)
+	require.Len(t, page.Arrivals, 20)
+	require.Equal(t, page.Arrivals[19].ID, page.Cursor)
+	last, err := repo.Events(ctx, &page.Cursor)
+	require.NoError(t, err)
+	require.Len(t, last.Arrivals, 1)
+	require.Greater(t, last.Arrivals[0].ID, page.Cursor)
 }

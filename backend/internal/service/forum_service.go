@@ -43,9 +43,15 @@ type ForumPage struct {
 	MutedUntil *time.Time     `json:"muted_until"`
 	HasMore    bool           `json:"has_more"`
 }
+type ForumArrival struct {
+	ID        int64       `json:"id"`
+	Author    ForumAuthor `json:"author"`
+	Rank      int         `json:"rank"`
+	CreatedAt time.Time   `json:"created_at"`
+}
 type ForumEvents struct {
 	Cursor   int64          `json:"cursor"`
-	Messages []ForumMessage `json:"messages"`
+	Arrivals []ForumArrival `json:"arrivals"`
 }
 type ForumMute struct {
 	Author     ForumAuthor `json:"author"`
@@ -55,6 +61,7 @@ type ForumRepository interface {
 	Page(context.Context, int64, int64) (*ForumPage, error)
 	Create(context.Context, int64, string) (*ForumMessage, error)
 	Events(context.Context, *int64) (*ForumEvents, error)
+	Arrive(context.Context, int64, string) error
 	UpdateSettings(context.Context, int64, *int, *int) error
 	Mute(context.Context, int64, int64, int) error
 	Mutes(context.Context, int64) ([]ForumMute, error)
@@ -85,6 +92,13 @@ func (s *ForumService) Create(ctx context.Context, user int64, content string) (
 }
 func (s *ForumService) Events(ctx context.Context, after *int64) (*ForumEvents, error) {
 	return s.repo.Events(ctx, after)
+}
+func (s *ForumService) Arrive(ctx context.Context, user int64, session string) error {
+	// 旧版无 sid 的令牌可正常使用网站，但不能生成无法稳定去重的上线通报。
+	if session == "" {
+		return nil
+	}
+	return s.repo.Arrive(ctx, user, session)
 }
 func (s *ForumService) UpdateSettings(ctx context.Context, actor int64, minutes, days *int) error {
 	if minutes == nil && days == nil || minutes != nil && (*minutes < 0 || *minutes > 525600) || days != nil && (*days < 0 || *days > 3650) {

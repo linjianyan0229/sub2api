@@ -66,6 +66,17 @@ func (h *ForumHandler) Create(c *gin.Context) {
 	}
 	response.Success(c, m)
 }
+func (h *ForumHandler) Arrive(c *gin.Context) {
+	actor, ok := forumActor(c)
+	if !ok {
+		return
+	}
+	if err := h.service.Arrive(c.Request.Context(), actor, c.GetString(middleware.ContextKeySessionID)); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"ok": true})
+}
 func (h *ForumHandler) Events(c *gin.Context) {
 	if _, ok := forumActor(c); !ok {
 		return

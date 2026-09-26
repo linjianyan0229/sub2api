@@ -1,6 +1,6 @@
 export default {
   forum: {
-    write: '发言', collapse: '收起输入框',
+    write: '发言', collapse: '收起输入框', arrived: '已上线',
     compose: '说点什么…', send: '发送', discussions: '全部讨论', empty: '还没有发言',
     pinned: '置顶', pin: '置顶', unpin: '取消置顶', rank: '排行榜第 {rank} 名', skip: '跳过',
     loadFailed: '讨论加载失败，请重试', failed: '操作失败，请重试', latest: '回到最新', older: '更早的发言',

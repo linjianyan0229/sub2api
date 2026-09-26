@@ -1,6 +1,6 @@
 export default {
   forum: {
-    write: 'Write', collapse: 'Collapse composer',
+    write: 'Write', collapse: 'Collapse composer', arrived: 'Has arrived',
     compose: 'Join the discussion…', send: 'Send', discussions: 'All discussions', empty: 'No messages yet',
     pinned: 'Pinned', pin: 'Pin', unpin: 'Unpin', rank: 'Leaderboard #{rank}', skip: 'Skip',
     loadFailed: 'Could not load discussions. Please retry.', failed: 'Action failed. Please retry.', latest: 'Back to latest', older: 'Earlier messages',

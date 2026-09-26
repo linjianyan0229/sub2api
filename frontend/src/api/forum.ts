@@ -14,6 +14,12 @@ export interface ForumMessage {
   pinned: boolean
   created_at: string
 }
+export interface ForumArrival {
+  id: number
+  author: ForumAuthor
+  rank: number
+  created_at: string
+}
 export interface ForumPage {
   messages: ForumMessage[]
   pinned: ForumMessage[]
@@ -31,7 +37,10 @@ export const forumAPI = {
     return (await apiClient.post<ForumMessage>('/forum/messages', { content })).data
   },
   async events(after?: number, signal?: AbortSignal) {
-    return (await apiClient.get<{ cursor: number; messages: ForumMessage[] }>('/forum/events', { params: { after }, signal })).data
+    return (await apiClient.get<{ cursor: number; arrivals: ForumArrival[] }>('/forum/events', { params: { after }, signal })).data
+  },
+  async arrive(signal?: AbortSignal) {
+    await apiClient.post('/forum/arrival', undefined, { signal })
   },
   async settings(settings: { mute_minutes?: number; retention_days?: number }) {
     await apiClient.patch('/admin/forum/settings', settings)
