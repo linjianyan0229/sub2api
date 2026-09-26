@@ -97,7 +97,7 @@ describe('共享额度分组展示', () => {
     expect(cards).toHaveLength(2)
     expect(cards[0].text()).toContain('OpenAI 分组')
     expect(cards[0].text()).toContain('$0.0123')
-    expect(cards[0].text()).toContain('$2.0000')
+    expect(cards[0].text()).toContain('$2.00')
     expect(cards[0].text()).toContain('$17.9877')
     expect(cards[1].text()).toContain('$0.00')
     expect(cards[1].text()).not.toContain('common.frozenBalance')
@@ -109,6 +109,14 @@ describe('共享额度分组展示', () => {
     expect(w.find('[data-testid="shared-group-quota"]').exists()).toBe(false)
     await w.setProps({ sharedQuota, sharedQuotaGroups: [] })
     expect(w.text()).not.toContain('common.sharedGroupQuota')
+  })
+
+  it('小额用量按计费精度展示，避免被四舍五入为零', () => {
+    const w = mount(UserDashboardStats, { props: { stats: makeStats(), balance: 370, sharedQuota, sharedQuotaGroups: [{ ...groups[0], shared_quota: { limit: 400, used: 0.0000048, held: 0.00000001, remaining: 399.99999519 } }], isSimple: false }, global: { stubs: { Icon: true } } })
+    const card = w.get('[data-testid="shared-group-quota"]')
+    expect(card.text()).toContain('$0.0000048')
+    expect(card.text()).toContain('$0.00000001')
+    expect(card.text()).toContain('$399.99999519')
   })
 })
 

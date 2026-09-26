@@ -12,10 +12,10 @@
         <div v-for="group in sharedGroups" :key="group.id" data-testid="shared-group-quota" :data-group-id="group.id" class="rounded-lg border border-gray-200 p-3 dark:border-dark-600">
           <p class="mb-2 font-medium text-gray-900 dark:text-white">{{ group.name }}</p>
           <dl class="space-y-1 text-xs">
-            <div class="flex justify-between gap-3"><dt>{{ t('common.dailyQuota') }}</dt><dd class="font-mono">${{ formatUsd(group.shared_quota.limit) }}</dd></div>
-            <div class="flex justify-between gap-3"><dt>{{ t('common.usedQuota') }}</dt><dd class="font-mono">${{ formatCost(group.shared_quota.used) }}</dd></div>
-            <div v-if="group.shared_quota.held > 0" class="flex justify-between gap-3"><dt>{{ t('common.frozenBalance') }}</dt><dd class="font-mono">${{ formatCost(group.shared_quota.held) }}</dd></div>
-            <div class="flex justify-between gap-3"><dt>{{ t('common.available') }}</dt><dd class="font-mono">${{ formatCost(group.shared_quota.remaining) }}</dd></div>
+            <div class="flex justify-between gap-3"><dt>{{ t('common.dailyQuota') }}</dt><dd class="font-mono">${{ formatSharedAmount(group.shared_quota.limit) }}</dd></div>
+            <div class="flex justify-between gap-3"><dt>{{ t('common.usedQuota') }}</dt><dd class="font-mono">${{ formatSharedAmount(group.shared_quota.used) }}</dd></div>
+            <div v-if="group.shared_quota.held > 0" class="flex justify-between gap-3"><dt>{{ t('common.frozenBalance') }}</dt><dd class="font-mono">${{ formatSharedAmount(group.shared_quota.held) }}</dd></div>
+            <div class="flex justify-between gap-3"><dt>{{ t('common.available') }}</dt><dd class="font-mono">${{ formatSharedAmount(group.shared_quota.remaining) }}</dd></div>
           </dl>
         </div>
       </div>
@@ -276,6 +276,8 @@ const { t } = useI18n()
 const sharedGroups = computed(() => (props.sharedQuotaGroups ?? []).filter(
   (group): group is Group & { shared_quota: SharedGroupQuota } => !!group.shared_quota
 ))
+const sharedAmountFormatter = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8 })
+const formatSharedAmount = (amount: number) => sharedAmountFormatter.format(amount)
 
 const PLATFORM_LABELS: Record<string, string> = {
   anthropic: 'Claude',
