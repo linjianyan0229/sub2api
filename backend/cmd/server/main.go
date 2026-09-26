@@ -31,11 +31,16 @@ var embeddedVersion string
 
 // Build-time variables (can be set by ldflags)
 var (
-	Version   = ""
-	Commit    = "unknown"
-	Date      = "unknown"
-	BuildType = "source" // "source" for manual builds, "release" for CI builds (set by ldflags)
+	Version        = ""
+	ReleaseVersion = "" // 定制发布通过 ldflags 注入，未设置时使用 Version。
+	Commit         = "unknown"
+	Date           = "unknown"
+	BuildType      = "source" // "source" for manual builds, "release" for CI builds (set by ldflags)
 )
+
+func currentBuildInfo() handler.BuildInfo {
+	return handler.BuildInfo{Version: Version, ReleaseVersion: ReleaseVersion, BuildType: BuildType}
+}
 
 func init() {
 	// 如果 Version 已通过 ldflags 注入（例如 -X main.Version=...），则不要覆盖。
@@ -62,7 +67,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		log.Printf("Sub2API %s (commit: %s, built: %s)\n", Version, Commit, Date)
+		log.Printf("Sub2API %s (commit: %s, built: %s)\n", currentBuildInfo().DisplayVersion(), Commit, Date)
 		return
 	}
 
@@ -143,10 +148,7 @@ func runMainServer() {
 		log.Println("⚠️  WARNING: Running in SIMPLE mode - billing and quota checks are DISABLED")
 	}
 
-	buildInfo := handler.BuildInfo{
-		Version:   Version,
-		BuildType: BuildType,
-	}
+	buildInfo := currentBuildInfo()
 
 	app, err := initializeApplication(buildInfo)
 	if err != nil {

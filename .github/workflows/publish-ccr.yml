@@ -45,6 +45,7 @@ jobs:
             ccr.ccs.tencentyun.com/linjianyan/sub2api:latest
           build-args: |
             VERSION=${{ steps.version.outputs.app_version }}
+            RELEASE_VERSION=${{ inputs.version }}
             COMMIT=${{ github.sha }}
           labels: |
             org.opencontainers.image.version=${{ inputs.version }}

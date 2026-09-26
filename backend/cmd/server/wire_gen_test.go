@@ -20,6 +20,26 @@ func TestProvideServiceBuildInfo(t *testing.T) {
 	require.Equal(t, in.BuildType, out.BuildType)
 }
 
+func TestReleaseVersionKeepsPluginCompatibility(t *testing.T) {
+	manifest := service.PluginManifest{Requires: service.PluginRequirements{
+		Sub2API: ">=0.2.9 <0.3.0", TestedSub2APIVersions: []string{"0.2.9"},
+		PluginProtocol: 1, TransportAPI: 1, UIBridge: 1,
+	}}
+	for _, test := range []struct{ release, display string }{
+		{"0.3.1", "0.3.1"}, {" 0.3.1 ", "0.3.1"}, {"", "0.2.9"}, {"  ", "0.2.9"},
+	} {
+		t.Run(test.release, func(t *testing.T) {
+			info := handler.BuildInfo{Version: "0.2.9", ReleaseVersion: test.release, BuildType: "container"}
+			require.Equal(t, test.display, info.DisplayVersion())
+			require.Equal(t, test.display, provideServiceBuildInfo(info).Version)
+			compatibility := service.EvaluatePluginCompatibility(manifest, providePluginHostInfo(info))
+			require.True(t, compatibility.Compatible)
+			require.True(t, compatibility.Tested)
+			require.Equal(t, "0.2.9", compatibility.CurrentSub2API)
+		})
+	}
+}
+
 func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 	cfg := &config.Config{}
 

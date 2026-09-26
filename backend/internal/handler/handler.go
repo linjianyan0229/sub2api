@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"strings"
+
 	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 )
@@ -73,6 +75,14 @@ type Handlers struct {
 
 // BuildInfo contains build-time information
 type BuildInfo struct {
-	Version   string
-	BuildType string // "source" for manual builds, "release" for CI builds
+	Version        string // 插件兼容性使用的宿主版本。
+	ReleaseVersion string // 定制发布版本，仅用于网站和更新信息。
+	BuildType      string // source、release 或 container
+}
+
+func (b BuildInfo) DisplayVersion() string {
+	if version := strings.TrimSpace(b.ReleaseVersion); version != "" {
+		return version
+	}
+	return b.Version
 }
