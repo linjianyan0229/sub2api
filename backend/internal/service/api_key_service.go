@@ -1091,6 +1091,22 @@ func (s *APIKeyService) GetAvailableGroups(ctx context.Context, userID int64) ([
 			availableGroups = append(availableGroups, group)
 		}
 	}
+	if q != nil && len(availableGroups) > 0 {
+		ids := make([]int64, len(availableGroups))
+		for i := range availableGroups {
+			ids[i] = availableGroups[i].ID
+		}
+		// 只查询已通过权限过滤的分组，并采用当前账期实际生效的上限。
+		quotas, err := s.sharedQuota.repo.GetGroupQuotas(ctx, q.WindowID, ids)
+		if err != nil {
+			return nil, fmt.Errorf("get shared group quotas: %w", err)
+		}
+		for i := range availableGroups {
+			if quota, ok := quotas[availableGroups[i].ID]; ok {
+				availableGroups[i].SharedQuota = &quota
+			}
+		}
+	}
 
 	return availableGroups, nil
 }

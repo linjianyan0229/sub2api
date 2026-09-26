@@ -15,7 +15,7 @@ vi.mock('vue-i18n', async () => {
 
 import UserDashboardStats from '../UserDashboardStats.vue'
 import type { UserDashboardStats as UserStatsType, PlatformDashboardStats } from '@/api/usage'
-import type { PlatformQuotaItem } from '@/types'
+import type { Group, PlatformQuotaItem, SharedQuota } from '@/types'
 
 function makeStats(over: Partial<UserStatsType> = {}): UserStatsType {
   return {
@@ -80,6 +80,37 @@ function mountStats(stats: UserStatsType, platformQuotas: PlatformQuotaItem[] | 
 function cardPlatforms(w: VueWrapper): string[] {
   return w.findAll('[data-testid="platform-card"]').map((c) => c.attributes('data-platform') ?? '')
 }
+
+describe('共享额度分组展示', () => {
+  const sharedQuota: SharedQuota = { window_id: 1, total: 400, used: 25, held: 5, remaining: 370, resets_at: '2026-09-27T01:00:00Z', timezone: 'Asia/Shanghai' }
+  const groups = [
+    { id: 1, name: 'OpenAI 分组', shared_quota: { limit: 20, used: 0.0123, held: 2, remaining: 17.9877 } },
+    { id: 2, name: '暂停分组', shared_quota: { limit: 0, used: 0, held: 0, remaining: 0 } },
+    { id: 3, name: '未设置上限' },
+  ] as Group[]
+
+  it('保留全站汇总，同时展示各分组用量、冻结和剩余，包括零上限', () => {
+    const w = mount(UserDashboardStats, { props: { stats: makeStats(), balance: 370, sharedQuota, sharedQuotaGroups: groups, isSimple: false }, global: { stubs: { Icon: true } } })
+    expect(w.text()).toContain('common.dailyQuota: $400.00')
+    expect(w.text()).toContain('common.usedQuota: $25.00')
+    const cards = w.findAll('[data-testid="shared-group-quota"]')
+    expect(cards).toHaveLength(2)
+    expect(cards[0].text()).toContain('OpenAI 分组')
+    expect(cards[0].text()).toContain('$0.0123')
+    expect(cards[0].text()).toContain('$2.0000')
+    expect(cards[0].text()).toContain('$17.9877')
+    expect(cards[1].text()).toContain('$0.00')
+    expect(cards[1].text()).not.toContain('common.frozenBalance')
+    expect(w.text()).not.toContain('未设置上限')
+  })
+
+  it('未启用共享额度或没有分组上限时不显示分组区域', async () => {
+    const w = mount(UserDashboardStats, { props: { stats: makeStats(), balance: 0, sharedQuotaGroups: groups, isSimple: false }, global: { stubs: { Icon: true } } })
+    expect(w.find('[data-testid="shared-group-quota"]').exists()).toBe(false)
+    await w.setProps({ sharedQuota, sharedQuotaGroups: [] })
+    expect(w.text()).not.toContain('common.sharedGroupQuota')
+  })
+})
 
 describe('UserDashboardStats 按平台拆分', () => {
   it('只有用量的平台才产生卡片；三档全空的限额记录不产生卡片', () => {

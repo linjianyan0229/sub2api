@@ -181,6 +181,7 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 func groupFromServiceBase(g *service.Group) Group {
 	return Group{
 		ID:                              g.ID,
+		SharedQuota:                     g.SharedQuota,
 		Name:                            g.Name,
 		Description:                     g.Description,
 		Platform:                        g.Platform,

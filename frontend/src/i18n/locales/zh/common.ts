@@ -1,6 +1,7 @@
 export default {
   common: {
     sharedQuota: '全站共享额度',
+    sharedGroupQuota: '分组共享额度',
     dailyQuota: '每日额度',
     usedQuota: '已用额度',
     quotaResetsAt: '刷新时间',

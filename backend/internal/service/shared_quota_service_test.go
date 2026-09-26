@@ -54,6 +54,10 @@ func (r *sharedQuotaTestRepo) GetGroupWindow(ctx context.Context, id, groupID in
 	return q, err
 }
 
+func (r *sharedQuotaTestRepo) GetGroupQuotas(context.Context, int64, []int64) (map[int64]SharedGroupQuota, error) {
+	return nil, r.err
+}
+
 type sharedQuotaTestEncryptor struct{}
 
 func (sharedQuotaTestEncryptor) Encrypt(s string) (string, error) { return s, nil }

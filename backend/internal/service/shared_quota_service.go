@@ -55,6 +55,7 @@ type SharedQuotaRepository interface {
 	Window(context.Context, *SharedQuotaPolicy, time.Time, time.Time, time.Time, float64) (*SharedQuotaSnapshot, error)
 	GetWindow(context.Context, int64) (*SharedQuotaSnapshot, error)
 	GetGroupWindow(context.Context, int64, int64) (*SharedQuotaSnapshot, error)
+	GetGroupQuotas(context.Context, int64, []int64) (map[int64]SharedGroupQuota, error)
 }
 
 type SharedQuotaService struct {

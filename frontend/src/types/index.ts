@@ -65,7 +65,7 @@ export interface UserProfileSourceContext {
 
 export interface SharedQuota {
   group_id?: number
-  group_quota?: { limit: number; used: number; held: number; remaining: number }
+  group_quota?: SharedGroupQuota
   window_id: number
   total: number
   used: number
@@ -73,6 +73,13 @@ export interface SharedQuota {
   remaining: number
   resets_at: string
   timezone: string
+}
+
+export interface SharedGroupQuota {
+  limit: number
+  used: number
+  held: number
+  remaining: number
 }
 
 export interface User {
@@ -574,6 +581,7 @@ export interface ReasoningEffortMapping {
 }
 
 export interface Group {
+  shared_quota?: SharedGroupQuota
   id: number
   name: string
   description: string | null

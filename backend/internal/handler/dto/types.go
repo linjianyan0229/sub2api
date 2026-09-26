@@ -93,6 +93,8 @@ type APIKey struct {
 }
 
 type Group struct {
+	SharedQuota *service.SharedGroupQuota `json:"shared_quota,omitempty"`
+
 	ID             int64   `json:"id"`
 	Name           string  `json:"name"`
 	Description    string  `json:"description"`

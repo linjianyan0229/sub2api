@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/Wei-Shaw/sub2api/pkg/pluginapi/sharedquota"
+	"github.com/lib/pq"
 )
 
 type sharedQuotaRepository struct{ db *sql.DB }
@@ -193,6 +194,32 @@ func (r *sharedQuotaRepository) GetWindow(ctx context.Context, id int64) (*servi
 
 func (r *sharedQuotaRepository) GetGroupWindow(ctx context.Context, id, groupID int64) (*service.SharedQuotaSnapshot, error) {
 	return sharedQuotaGroupWindow(ctx, r.db, id, groupID)
+}
+
+func (r *sharedQuotaRepository) GetGroupQuotas(ctx context.Context, windowID int64, groupIDs []int64) (map[int64]service.SharedGroupQuota, error) {
+	quotas := make(map[int64]service.SharedGroupQuota)
+	if len(groupIDs) == 0 {
+		return quotas, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT limits.key::bigint,limits.value::numeric,
+        COALESCE(g.used,0),COALESCE(g.held,0),
+        GREATEST(0,limits.value::numeric-COALESCE(g.used,0)-COALESCE(g.held,0))
+        FROM shared_quota_windows w CROSS JOIN LATERAL jsonb_each_text(w.group_limits) limits
+        LEFT JOIN shared_quota_group_usage g ON g.window_id=w.id AND g.group_id=limits.key::bigint
+        WHERE w.id=$1 AND limits.key::bigint=ANY($2)`, windowID, pq.Array(groupIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var quota service.SharedGroupQuota
+		if err := rows.Scan(&id, &quota.Limit, &quota.Used, &quota.Held, &quota.Remaining); err != nil {
+			return nil, err
+		}
+		quotas[id] = quota
+	}
+	return quotas, rows.Err()
 }
 
 func sharedQuotaGroupWindow(ctx context.Context, db sharedQuotaQueryer, id, groupID int64) (*service.SharedQuotaSnapshot, error) {

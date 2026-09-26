@@ -79,7 +79,7 @@ sudo journalctl -u sub2api-ccr-update.service
 在仓库根目录构建。先登录 CCR，再推送版本标签与 `latest`：
 
 ```bash
-VERSION=0.3.2
+VERSION=0.3.3
 IMAGE=ccr.ccs.tencentyun.com/linjianyan/sub2api
 docker build --build-arg VERSION="$(cat backend/cmd/server/VERSION)" --build-arg RELEASE_VERSION="$VERSION" --label "org.opencontainers.image.version=$VERSION" -t "$IMAGE:$VERSION" -t "$IMAGE:latest" .
 docker save -o sub2api-image.tar "$IMAGE:$VERSION" "$IMAGE:latest"
@@ -87,13 +87,15 @@ docker push "$IMAGE:$VERSION"
 docker push "$IMAGE:latest"
 ```
 
-网站发布版本与插件兼容版本分开：`RELEASE_VERSION` 注入网站公开设置、管理员版本接口和命令行版本显示；插件继续使用 `VERSION`（取自 `backend/cmd/server/VERSION`）检查兼容范围。未指定发布版本时，显示回退到 `VERSION`。CCR 工作流自动传入镜像版本作为 `RELEASE_VERSION`；直接编译二进制时使用 `-X main.ReleaseVersion=0.3.2`。离线主机可 `docker load -i sub2api-image.tar` 后启动。更新仍需要主机能够访问 CCR 并拥有拉取权限。
+网站发布版本与插件兼容版本分开：`RELEASE_VERSION` 注入网站公开设置、管理员版本接口和命令行版本显示；插件继续使用 `VERSION`（取自 `backend/cmd/server/VERSION`）检查兼容范围。未指定发布版本时，显示回退到 `VERSION`。CCR 工作流自动传入镜像版本作为 `RELEASE_VERSION`；直接编译二进制时使用 `-X main.ReleaseVersion=0.3.3`。离线主机可 `docker load -i sub2api-image.tar` 后启动。更新仍需要主机能够访问 CCR 并拥有拉取权限。
 
 镜像 `0.3` 包含论坛和共享额度生效方式支持，应用兼容版本仍为 `0.2.9`，兼容现有共享额度插件的版本范围。共享额度的新配置页面由插件 `0.1.3` 提供，已有实例需按插件说明另行升级持久化插件包；更新镜像不会覆盖已安装插件。
 
 镜像 `0.3.1` 将论坛全站通报改为榜单用户上线触发，并按登录会话去重；启动时执行 `245_forum_arrivals.sql`，升级前保留数据库备份。应用兼容版本继续为 `0.2.9`。
 
 镜像 `0.3.2` 配合共享额度插件 `0.1.4` 新增分组每日使用上限，启动时执行 `246_shared_quota_group_limits.sql`。先备份数据库并更新宿主，再停用、上传新插件包并按原状态启用；升级过程应暂停外部计费请求，避免停用期间回落到个人计费。已有全站额度、当期用量和刷新时间保留，默认不添加分组上限。网站显示版本为 `0.3.2`，插件兼容版本仍为 `0.2.9`；仅升级插件包不足以启用新功能。
+
+镜像 `0.3.3` 修复用户面板缺少分组额度用量的问题：在全站汇总下展示当前用户可用分组的有效每日上限、已用、冻结和剩余金额；下次刷新才生效的配置不会提前展示。继续使用插件 `0.1.4`，无需重装插件或新增数据库迁移。
 
 代码仓库：`https://github.com/linjianyan0229/sub2api`。本地 `origin` 和默认推送分支指向自有仓库；`upstream` 仅用于读取原项目更新，已禁用推送。版本直接提交到自有仓库，无需向上游提交合并请求。保留原项目许可证和 Go 模块路径。
 

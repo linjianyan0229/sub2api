@@ -1,6 +1,7 @@
 export default {
   common: {
     sharedQuota: 'Shared site quota',
+    sharedGroupQuota: 'Shared group quotas',
     dailyQuota: 'Daily quota',
     usedQuota: 'Used quota',
     quotaResetsAt: 'Resets at',

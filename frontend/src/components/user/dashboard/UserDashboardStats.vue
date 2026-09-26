@@ -1,9 +1,25 @@
 <template>
 
-  <div v-if="sharedQuota" class="card mb-4 flex flex-wrap gap-x-8 gap-y-2 p-4 text-sm">
-    <span>{{ t('common.dailyQuota') }}: ${{ sharedQuota.total.toFixed(2) }}</span>
-    <span>{{ t('common.usedQuota') }}: ${{ sharedQuota.used.toFixed(2) }}</span>
-    <span>{{ t('common.quotaResetsAt') }}: {{ new Date(sharedQuota.resets_at).toLocaleString() }}</span>
+  <div v-if="sharedQuota" class="card mb-4 p-4 text-sm">
+    <div class="flex flex-wrap gap-x-8 gap-y-2">
+      <span>{{ t('common.dailyQuota') }}: ${{ sharedQuota.total.toFixed(2) }}</span>
+      <span>{{ t('common.usedQuota') }}: ${{ sharedQuota.used.toFixed(2) }}</span>
+      <span>{{ t('common.quotaResetsAt') }}: {{ new Date(sharedQuota.resets_at).toLocaleString() }}</span>
+    </div>
+    <div v-if="sharedGroups.length" class="mt-4 border-t border-gray-200 pt-3 dark:border-dark-700">
+      <h3 class="mb-3 font-semibold text-gray-900 dark:text-white">{{ t('common.sharedGroupQuota') }}</h3>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <div v-for="group in sharedGroups" :key="group.id" data-testid="shared-group-quota" :data-group-id="group.id" class="rounded-lg border border-gray-200 p-3 dark:border-dark-600">
+          <p class="mb-2 font-medium text-gray-900 dark:text-white">{{ group.name }}</p>
+          <dl class="space-y-1 text-xs">
+            <div class="flex justify-between gap-3"><dt>{{ t('common.dailyQuota') }}</dt><dd class="font-mono">${{ formatUsd(group.shared_quota.limit) }}</dd></div>
+            <div class="flex justify-between gap-3"><dt>{{ t('common.usedQuota') }}</dt><dd class="font-mono">${{ formatCost(group.shared_quota.used) }}</dd></div>
+            <div v-if="group.shared_quota.held > 0" class="flex justify-between gap-3"><dt>{{ t('common.frozenBalance') }}</dt><dd class="font-mono">${{ formatCost(group.shared_quota.held) }}</dd></div>
+            <div class="flex justify-between gap-3"><dt>{{ t('common.available') }}</dt><dd class="font-mono">${{ formatCost(group.shared_quota.remaining) }}</dd></div>
+          </dl>
+        </div>
+      </div>
+    </div>
   </div>
   <!-- Row 1: Core Stats -->
   <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -235,7 +251,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { PlatformDashboardStats, UserDashboardStats as UserStatsType } from '@/api/usage'
-import type { PlatformQuotaItem, SharedQuota } from '@/types'
+import type { Group, PlatformQuotaItem, SharedGroupQuota, SharedQuota } from '@/types'
 
 interface FusedPlatformCard {
   platform: string
@@ -251,10 +267,15 @@ const props = defineProps<{
   stats: UserStatsType
   balance: number
   sharedQuota?: SharedQuota
+  sharedQuotaGroups?: Group[]
   isSimple: boolean
   platformQuotas?: PlatformQuotaItem[] | null
 }>()
 const { t } = useI18n()
+
+const sharedGroups = computed(() => (props.sharedQuotaGroups ?? []).filter(
+  (group): group is Group & { shared_quota: SharedGroupQuota } => !!group.shared_quota
+))
 
 const PLATFORM_LABELS: Record<string, string> = {
   anthropic: 'Claude',
