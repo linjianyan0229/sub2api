@@ -58,7 +58,7 @@ func (User) Fields() []ent.Field {
 			MaxLen(20).
 			Default(domain.StatusActive),
 
-		// Optional profile fields (added later; default '' in DB migration)
+		// 非空昵称唯一性及管理员保留名由迁移 247 的索引和触发器维护。
 		field.String("username").
 			MaxLen(100).
 			Default(""),

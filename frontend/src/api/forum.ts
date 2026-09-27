@@ -3,6 +3,7 @@ import { apiClient } from './client'
 export interface ForumAuthor {
   user_id: number
   username: string
+  is_admin?: boolean
   avatar_url: string
   actual_cost: number
 }

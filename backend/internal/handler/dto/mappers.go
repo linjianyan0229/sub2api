@@ -15,6 +15,7 @@ func UserFromServiceShallow(u *service.User) *User {
 	}
 	return &User{
 		SharedQuota:                u.SharedQuota,
+		SiteSharedQuota:            u.SiteSharedQuota,
 		ID:                         u.ID,
 		Email:                      u.Email,
 		Username:                   u.Username,

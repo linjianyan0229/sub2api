@@ -21,6 +21,7 @@ var (
 type ForumAuthor struct {
 	UserID     int64   `json:"user_id"`
 	Username   string  `json:"username"`
+	IsAdmin    bool    `json:"is_admin"`
 	AvatarURL  string  `json:"avatar_url"`
 	ActualCost float64 `json:"actual_cost"`
 }

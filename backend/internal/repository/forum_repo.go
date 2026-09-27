@@ -19,7 +19,7 @@ const forumRankSelect = `WITH top AS (SELECT t.user_id,ROW_NUMBER() OVER (ORDER 
     WHERE t.actual_cost>0 OR t.tokens>0 ORDER BY t.actual_cost DESC,t.tokens DESC,t.user_id ASC LIMIT 20)
     SELECT COALESCE((SELECT rank FROM top WHERE user_id=$1),0)`
 
-const forumMessageSelect = `SELECT m.id,COALESCE(u.id,0),COALESCE(u.username,''),COALESCE(a.url,''),COALESCE(t.actual_cost,0),
+const forumMessageSelect = `SELECT m.id,COALESCE(u.id,0),COALESCE(u.username,''),COALESCE(u.role='admin',false),COALESCE(a.url,''),COALESCE(t.actual_cost,0),
     m.content,m.rank_at_send,m.pinned,m.created_at FROM forum_messages m
     LEFT JOIN users u ON u.id=m.user_id AND u.deleted_at IS NULL
     LEFT JOIN user_avatars a ON a.user_id=u.id
@@ -27,7 +27,7 @@ const forumMessageSelect = `SELECT m.id,COALESCE(u.id,0),COALESCE(u.username,'')
 
 func scanForumMessage(row interface{ Scan(...any) error }) (service.ForumMessage, error) {
 	var m service.ForumMessage
-	err := row.Scan(&m.ID, &m.Author.UserID, &m.Author.Username, &m.Author.AvatarURL, &m.Author.ActualCost, &m.Content, &m.Rank, &m.Pinned, &m.CreatedAt)
+	err := row.Scan(&m.ID, &m.Author.UserID, &m.Author.Username, &m.Author.IsAdmin, &m.Author.AvatarURL, &m.Author.ActualCost, &m.Content, &m.Rank, &m.Pinned, &m.CreatedAt)
 	m.Author.Username = service.ForumDisplayName(m.Author.Username)
 	return m, err
 }
@@ -173,7 +173,7 @@ func (r *forumRepository) Events(ctx context.Context, after *int64) (*service.Fo
 	}
 	// 首次连接只建立游标，不重播之前的上线记录。
 	if after != nil {
-		rows, err := tx.QueryContext(ctx, `SELECT e.id,u.id,u.username,COALESCE(a.url,''),COALESCE(t.actual_cost,0),e.rank_at_arrival,e.created_at
+		rows, err := tx.QueryContext(ctx, `SELECT e.id,u.id,u.username,u.role='admin',COALESCE(a.url,''),COALESCE(t.actual_cost,0),e.rank_at_arrival,e.created_at
             FROM forum_arrivals e JOIN users u ON u.id=e.user_id AND u.deleted_at IS NULL AND u.status='active'
             LEFT JOIN user_avatars a ON a.user_id=u.id
             LEFT JOIN user_usage_lifetime_totals t ON t.user_id=u.id
@@ -185,7 +185,7 @@ func (r *forumRepository) Events(ctx context.Context, after *int64) (*service.Fo
 		defer rows.Close()
 		for rows.Next() {
 			var event service.ForumArrival
-			if err := rows.Scan(&event.ID, &event.Author.UserID, &event.Author.Username, &event.Author.AvatarURL, &event.Author.ActualCost, &event.Rank, &event.CreatedAt); err != nil {
+			if err := rows.Scan(&event.ID, &event.Author.UserID, &event.Author.Username, &event.Author.IsAdmin, &event.Author.AvatarURL, &event.Author.ActualCost, &event.Rank, &event.CreatedAt); err != nil {
 				return nil, err
 			}
 			event.Author.Username = service.ForumDisplayName(event.Author.Username)
@@ -243,7 +243,7 @@ func (r *forumRepository) Mute(ctx context.Context, actor, user int64, minutes i
 func (r *forumRepository) Mutes(ctx context.Context, actor int64) ([]service.ForumMute, error) {
 	out := []service.ForumMute{}
 	err := r.mutation(ctx, actor, true, func(tx *sql.Tx, _ time.Time, _ bool, _ *time.Time) error {
-		rows, err := tx.QueryContext(ctx, `SELECT u.id,COALESCE(u.username,''),COALESCE(a.url,''),COALESCE(t.actual_cost,0),f.muted_until
+		rows, err := tx.QueryContext(ctx, `SELECT u.id,COALESCE(u.username,''),u.role='admin',COALESCE(a.url,''),COALESCE(t.actual_cost,0),f.muted_until
             FROM forum_members f JOIN users u ON u.id=f.user_id AND u.deleted_at IS NULL
             LEFT JOIN user_avatars a ON a.user_id=u.id LEFT JOIN user_usage_lifetime_totals t ON t.user_id=u.id
             WHERE f.muted_until>NOW() ORDER BY f.muted_until DESC LIMIT 500`)
@@ -253,7 +253,7 @@ func (r *forumRepository) Mutes(ctx context.Context, actor int64) ([]service.For
 		defer rows.Close()
 		for rows.Next() {
 			var item service.ForumMute
-			if err = rows.Scan(&item.Author.UserID, &item.Author.Username, &item.Author.AvatarURL, &item.Author.ActualCost, &item.MutedUntil); err != nil {
+			if err = rows.Scan(&item.Author.UserID, &item.Author.Username, &item.Author.IsAdmin, &item.Author.AvatarURL, &item.Author.ActualCost, &item.MutedUntil); err != nil {
 				return err
 			}
 			item.Author.Username = service.ForumDisplayName(item.Author.Username)

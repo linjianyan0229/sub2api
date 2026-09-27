@@ -156,7 +156,14 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 		SetRestrictPublicGroups(userIn.RestrictPublicGroups).
 		Save(txCtx)
 	if err != nil {
-		return translatePersistenceError(err, nil, service.ErrEmailExists)
+		return translateUserWriteError(err)
+	}
+	// Ent 创建时只回读 ID，昵称可能已被数据库的保留名规则改写。
+	if created.Username != "" {
+		created, err = txClient.User.Get(txCtx, created.ID)
+		if err != nil {
+			return err
+		}
 	}
 
 	if err := r.syncUserAllowedGroupsWithClient(txCtx, txClient, created.ID, userIn.AllowedGroups); err != nil {
@@ -343,7 +350,7 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	}
 	updated, err := updateOp.Save(txCtx)
 	if err != nil {
-		return translatePersistenceError(err, service.ErrUserNotFound, service.ErrEmailExists)
+		return translateUserWriteError(err)
 	}
 
 	if fields.AllowedGroups {
@@ -364,7 +371,16 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	}
 
 	userIn.UpdatedAt = updated.UpdatedAt
+	userIn.Username = updated.Username
 	return nil
+}
+
+func translateUserWriteError(err error) error {
+	var pgErr *pq.Error
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.Constraint == "users_username_normalized_unique" {
+		return service.ErrUsernameExists.WithCause(err)
+	}
+	return translatePersistenceError(err, service.ErrUserNotFound, service.ErrEmailExists)
 }
 
 func ensureEmailAuthIdentityWithClient(ctx context.Context, client *dbent.Client, userID int64, email string, source string) error {
@@ -1532,6 +1548,7 @@ func applyUserEntityToService(dst *service.User, src *dbent.User) {
 		return
 	}
 	dst.ID = src.ID
+	dst.Username = src.Username
 	dst.SignupSource = src.SignupSource
 	dst.LastLoginAt = src.LastLoginAt
 	dst.LastActiveAt = src.LastActiveAt

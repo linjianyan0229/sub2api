@@ -24,6 +24,9 @@ type User struct {
 	Concurrency    int
 	Status         string
 	AllowedGroups  []int64
+
+	SiteSharedQuota *SharedQuotaSnapshot // 管理员的全站额度展示，不参与个人计费。
+
 	// RestrictPublicGroups narrows the public groups this user may bind to the
 	// ones listed in AllowedGroups. False keeps the default, where every public
 	// group is bindable.

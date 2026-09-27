@@ -25,6 +25,7 @@ import (
 
 	entsql "entgo.io/ent/dialect/sql"
 	"github.com/gin-gonic/gin"
+	"github.com/lib/pq"
 )
 
 const (
@@ -1212,6 +1213,10 @@ func applyPendingOAuthBindingTx(
 		if err := tx.Client().User.UpdateOneID(targetUserID).
 			SetUsername(adoptedDisplayName).
 			Exec(ctx); err != nil {
+			var pgErr *pq.Error
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.Constraint == "users_username_normalized_unique" {
+				return service.ErrUsernameExists.WithCause(err)
+			}
 			return err
 		}
 	}

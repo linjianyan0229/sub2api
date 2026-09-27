@@ -7,6 +7,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/pkg/pluginapi/sharedquota"
 )
 
@@ -80,6 +81,10 @@ func (s *SharedQuotaService) snapshotForGroup(ctx context.Context, user *User, g
 	if s == nil || user == nil || user.IsAdmin() {
 		return nil, nil
 	}
+	return s.currentSnapshot(ctx, groupID)
+}
+
+func (s *SharedQuotaService) currentSnapshot(ctx context.Context, groupID int64) (*SharedQuotaSnapshot, error) {
 	// 配置保存与账期查询可能来自不同实例；旧配置不能覆盖刚保存的额度。
 	for attempt := 0; attempt < 3; attempt++ {
 		w, err := s.snapshotCurrentPolicy(ctx, groupID)
@@ -184,6 +189,18 @@ func (s *AuthService) ApplySharedQuotaView(ctx context.Context, user *User) erro
 }
 
 func (s *SharedQuotaService) applyView(ctx context.Context, user *User) error {
+	if s == nil || user == nil {
+		return nil
+	}
+	if user.IsAdmin() {
+		// 展示异常不能阻断管理员登录及修复插件配置。
+		w, err := s.currentSnapshot(ctx, 0)
+		user.SiteSharedQuota = w
+		if err != nil {
+			logger.LegacyPrintf("service.shared_quota", "读取管理员全站额度展示失败: %v", err)
+		}
+		return nil
+	}
 	w, err := s.Snapshot(ctx, user)
 	if err != nil {
 		return err

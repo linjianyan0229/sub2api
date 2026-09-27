@@ -27,6 +27,7 @@ var (
 	ErrInvalidCredentials           = infraerrors.Unauthorized("INVALID_CREDENTIALS", "invalid email or password")
 	ErrUserNotActive                = infraerrors.Forbidden("USER_NOT_ACTIVE", "user is not active")
 	ErrEmailExists                  = infraerrors.Conflict("EMAIL_EXISTS", "email already exists")
+	ErrUsernameExists               = infraerrors.Conflict("USERNAME_EXISTS", "用户名已被使用")
 	ErrEmailReserved                = infraerrors.BadRequest("EMAIL_RESERVED", "email is reserved")
 	ErrInvalidToken                 = infraerrors.Unauthorized("INVALID_TOKEN", "invalid token")
 	ErrTokenExpired                 = infraerrors.Unauthorized("TOKEN_EXPIRED", "token has expired")
@@ -622,6 +623,9 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 			}
 
 			if err := s.userRepo.Create(ctx, newUser); err != nil {
+				if errors.Is(err, ErrUsernameExists) {
+					return "", nil, err
+				}
 				if errors.Is(err, ErrEmailExists) {
 					// 并发场景：GetByEmail 与 Create 之间用户被创建。
 					user, err = s.userRepo.GetByEmail(ctx, email)
@@ -654,6 +658,7 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 	if user.Username == "" && username != "" {
 		user.Username = username
 		if err := s.userRepo.Update(ctx, user, UserUpdateFields{Username: true}); err != nil {
+			user.Username = ""
 			logger.LegacyPrintf("service.auth", "[Auth] Failed to update username after oauth login: %v", err)
 		}
 	}
@@ -783,6 +788,9 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 				txCtx := dbent.NewTxContext(ctx, tx)
 
 				if err := s.userRepo.Create(txCtx, newUser); err != nil {
+					if errors.Is(err, ErrUsernameExists) {
+						return nil, nil, err
+					}
 					if errors.Is(err, ErrEmailExists) {
 						user, err = s.userRepo.GetByEmail(ctx, email)
 						if err != nil {
@@ -811,6 +819,9 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 				}
 			} else {
 				if err := s.userRepo.Create(ctx, newUser); err != nil {
+					if errors.Is(err, ErrUsernameExists) {
+						return nil, nil, err
+					}
 					if errors.Is(err, ErrEmailExists) {
 						user, err = s.userRepo.GetByEmail(ctx, email)
 						if err != nil {
@@ -849,6 +860,7 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 	if user.Username == "" && username != "" {
 		user.Username = username
 		if err := s.userRepo.Update(ctx, user, UserUpdateFields{Username: true}); err != nil {
+			user.Username = ""
 			logger.LegacyPrintf("service.auth", "[Auth] Failed to update username after oauth login: %v", err)
 		}
 	}

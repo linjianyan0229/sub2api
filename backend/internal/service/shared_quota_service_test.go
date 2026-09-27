@@ -104,6 +104,33 @@ func TestSharedQuotaFailsClosedAndChecksLiveRemaining(t *testing.T) {
 	require.ErrorIs(t, svc.Check(context.Background(), &SharedQuotaSnapshot{WindowID: 1}), ErrBillingServiceUnavailable)
 }
 
+func TestSharedQuotaAdminViewPreservesPersonalBilling(t *testing.T) {
+	repo := &sharedQuotaTestRepo{policy: &SharedQuotaPolicy{ConfigEncrypted: `{"daily_quota":100,"reset_time":"00:00"}`}, quota: SharedQuotaSnapshot{WindowID: 7, Remaining: 85, Held: 3, Used: 12}}
+	svc, err := NewSharedQuotaService(repo, sharedQuotaTestEncryptor{}, &config.Config{Timezone: "UTC"})
+	require.NoError(t, err)
+	admin := &User{Role: RoleAdmin, Balance: 20, FrozenBalance: 2, BalanceNotifyEnabled: true}
+	require.NoError(t, svc.applyView(context.Background(), admin))
+	require.Equal(t, 85.0, admin.SiteSharedQuota.Remaining)
+	require.Nil(t, admin.SharedQuota)
+	require.Equal(t, 20.0, admin.Balance)
+	require.Equal(t, 2.0, admin.FrozenBalance)
+	require.True(t, admin.BalanceNotifyEnabled)
+	key, err := (&APIKeyService{sharedQuota: svc}).BindSharedQuota(context.Background(), &APIKey{User: admin})
+	require.NoError(t, err)
+	require.Nil(t, key.User.SharedQuota)
+	params := &postUsageBillingParams{User: key.User, APIKey: key, Account: &Account{ID: 3, Type: AccountTypeOAuth}, Cost: &CostBreakdown{TotalCost: 1, ActualCost: 1}}
+	cmd := buildUsageBillingCommand("admin-view", &UsageLog{}, params)
+	require.Zero(t, cmd.SharedQuotaWindowID)
+	require.Equal(t, 1.0, cmd.BalanceCost)
+	repo.policy = nil
+	require.NoError(t, svc.applyView(context.Background(), admin))
+	require.Nil(t, admin.SiteSharedQuota)
+	repo.err = errors.New("plugin unavailable")
+	require.NoError(t, svc.applyView(context.Background(), admin))
+	require.Nil(t, admin.SiteSharedQuota)
+	require.Equal(t, 20.0, admin.Balance)
+}
+
 func TestSharedQuotaCommandNeverBillsPersonalSources(t *testing.T) {
 	user := &User{ID: 1, Role: RoleUser, SharedQuota: &SharedQuotaSnapshot{WindowID: 42, GroupID: 7}}
 	key := &APIKey{ID: 2, User: user, Quota: 1, RateLimit5h: 1}

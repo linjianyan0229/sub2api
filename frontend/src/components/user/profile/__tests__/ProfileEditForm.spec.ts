@@ -15,7 +15,7 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: () => authState,
 }))
 vi.mock('@/stores/app', () => ({
-  useAppStore: () => ({ showError: showErrorMock }),
+  useAppStore: () => ({ showError: showErrorMock, showSuccess: vi.fn() }),
 }))
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
@@ -37,5 +37,14 @@ describe('ProfileEditForm', () => {
     expect(showErrorMock).toHaveBeenLastCalledWith(expectedMessage)
     expect(authState.user.username).toBe('alice')
     expect(wrapper.get('button[type="submit"]').attributes('disabled')).toBeUndefined()
+  })
+  it('保存后显示服务端分配的实际昵称', async () => {
+    updateProfileMock.mockResolvedValue({ username: '小丑_1' })
+    const wrapper = mount(ProfileEditForm, { props: { initialUsername: 'alice' } })
+    await wrapper.get('#username').setValue('管理员')
+    await wrapper.get('form').trigger('submit.prevent')
+    expect(authState.user.username).toBe('小丑_1')
+    expect((wrapper.get('#username').element as HTMLInputElement).value).toBe('小丑_1')
+    wrapper.unmount()
   })
 })

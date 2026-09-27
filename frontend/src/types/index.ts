@@ -84,6 +84,7 @@ export interface SharedGroupQuota {
 
 export interface User {
   shared_quota?: SharedQuota
+  site_shared_quota?: SharedQuota
   id: number
   username: string
   email: string

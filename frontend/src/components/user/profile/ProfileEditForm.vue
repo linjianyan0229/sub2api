@@ -76,6 +76,7 @@ const handleUpdateProfile = async () => {
       username: username.value
     })
     authStore.user = updatedUser
+    username.value = updatedUser.username
     appStore.showSuccess(t('profile.updateSuccess'))
   } catch (error: unknown) {
     appStore.showError(extractApiErrorMessage(error, t('profile.updateFailed')))

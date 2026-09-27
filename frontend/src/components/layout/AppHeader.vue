@@ -57,6 +57,16 @@
         <SubscriptionProgressMini v-if="user && !authStore.isSharedQuota && subscriptionFeatureEnabled" />
 
         <!-- Balance Display -->
+        <div v-if="authStore.isAdmin && user?.site_shared_quota" data-testid="admin-site-quota" class="group relative flex flex-col rounded-xl bg-teal-50 px-2 py-1 dark:bg-teal-900/20 sm:px-3" tabindex="0">
+          <span class="text-[10px] text-teal-700 dark:text-teal-300">{{ t('common.sharedQuota') }}</span>
+          <span class="text-xs font-semibold tabular-nums text-teal-800 dark:text-teal-200">{{ formatHeaderMoney(user.site_shared_quota.remaining) }}</span>
+          <div class="pointer-events-none absolute right-0 top-full mt-2 hidden w-64 rounded-lg border border-gray-200 bg-white p-3 text-xs shadow-lg group-hover:block group-focus:block dark:border-dark-700 dark:bg-dark-800">
+            <div class="flex justify-between gap-3"><span>{{ t('common.dailyQuota') }}</span><span>{{ formatHeaderMoney(user.site_shared_quota.total) }}</span></div>
+            <div class="mt-2 flex justify-between gap-3"><span>{{ t('common.usedQuota') }}</span><span>{{ formatHeaderMoney(user.site_shared_quota.used) }}</span></div>
+            <div class="mt-2 flex justify-between gap-3"><span>{{ t('common.frozenBalance') }}</span><span>{{ formatHeaderMoney(user.site_shared_quota.held) }}</span></div>
+            <div class="mt-2 border-t border-gray-100 pt-2 dark:border-dark-700">{{ t('common.quotaResetsAt') }}: {{ new Date(user.site_shared_quota.resets_at).toLocaleString() }}</div>
+          </div>
+        </div>
         <div
           v-if="user"
           class="group relative hidden items-center gap-2 rounded-xl bg-primary-50 px-3 py-1.5 dark:bg-primary-900/20 sm:flex"

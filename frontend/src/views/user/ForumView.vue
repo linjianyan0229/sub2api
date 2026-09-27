@@ -17,7 +17,7 @@
           <span class="pin-label">{{ t('forum.pinned') }}</span>
           <div class="pinned-content">
             <article v-for="message in page.pinned" :key="message.id" class="pinned-message">
-              <div class="flex items-center justify-between gap-3"><strong>{{ message.author.username || t('leaderboard.anonymous') }}</strong><button v-if="auth.isAdmin" class="forum-action" :disabled="busy" @click="act(() => forumAPI.pin(message.id, false))">{{ t('forum.unpin') }}</button></div>
+              <div class="flex items-center justify-between gap-3"><div class="flex min-w-0 flex-wrap items-center gap-2"><strong>{{ message.author.username || t('leaderboard.anonymous') }}</strong><ForumAdminBadge v-if="message.author.is_admin" /></div><button v-if="auth.isAdmin" class="forum-action" :disabled="busy" @click="act(() => forumAPI.pin(message.id, false))">{{ t('forum.unpin') }}</button></div>
               <p class="forum-body">{{ message.content }}</p>
             </article>
           </div>
@@ -38,6 +38,7 @@
               <div class="message-content">
                 <div class="message-author">
                   <strong>{{ message.author.username || t('leaderboard.anonymous') }}</strong>
+                  <ForumAdminBadge v-if="message.author.is_admin" />
                   <span v-if="message.rank" class="forum-rank">{{ t('forum.rank', { rank: message.rank }) }}</span>
                   <span class="message-usage">${{ formatCostFixed(message.author.actual_cost, 4) }} USD</span>
                 </div>
@@ -100,6 +101,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import ForumAvatar from '@/components/forum/ForumAvatar.vue'
+import ForumAdminBadge from '@/components/forum/ForumAdminBadge.vue'
 import ForumComposer from '@/components/forum/ForumComposer.vue'
 import ForumDrawer from '@/components/forum/ForumDrawer.vue'
 import { forumAPI, type ForumAuthor, type ForumMute, type ForumPage } from '@/api/forum'

@@ -54,6 +54,20 @@ describe('论坛讨论', () => {
     expect(mocks.error).toHaveBeenCalledWith('FORUM_MUTED')
     wrapper.unmount()
   })
+  it('管理员称号在发言与置顶中展示，普通账号同样昵称也不能获得称号', async () => {
+    const result = snapshot()
+    const message = { ...result.messages[0], author: { ...result.messages[0].author, username: '管理员', is_admin: true } }
+    mocks.page.mockResolvedValue({ ...result, messages: [message], pinned: [message] })
+    const wrapper = mount(ForumView)
+    await flushPromises()
+    expect(wrapper.findAllComponents({ name: 'ForumAdminBadge' })).toHaveLength(2)
+    mocks.page.mockResolvedValue({ ...result, messages: [{ ...message, author: { ...message.author, is_admin: false } }], pinned: [] })
+    await wrapper.get('header button').trigger('click')
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'ForumAdminBadge' }).exists()).toBe(false)
+    expect(wrapper.text()).toContain('管理员')
+    wrapper.unmount()
+  })
   it('管理员清空必须先确认，清空调用不携带用户可控身份', async () => {
     mocks.auth.isAdmin = true
     const wrapper = mount(ForumView)

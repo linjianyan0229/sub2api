@@ -25,6 +25,8 @@ type User struct {
 	UpdatedAt     time.Time                    `json:"updated_at"`
 	DeletedAt     *time.Time                   `json:"deleted_at,omitempty"`
 
+	SiteSharedQuota *service.SharedQuotaSnapshot `json:"site_shared_quota,omitempty"`
+
 	// 余额不足通知
 	BalanceNotifyEnabled       bool               `json:"balance_notify_enabled"`
 	BalanceNotifyThresholdType string             `json:"balance_notify_threshold_type"`
