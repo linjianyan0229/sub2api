@@ -145,6 +145,7 @@
           </router-link>
         </div>
       </template>
+      <ChannelQuotaSummary v-if="!sidebarCollapsed" @navigate="handleMenuItemClick('/channel-quotas')" />
     </nav>
 
     <!-- Bottom Section -->
@@ -188,6 +189,7 @@
 </template>
 
 <script setup lang="ts">
+import ChannelQuotaSummary from "@/components/contributions/ChannelQuotaSummary.vue"
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -734,7 +736,8 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/usage', label: t('nav.usage'), icon: ChartIcon, hideInSimpleMode: true },
     ...(withDashboard ? [{ path: '/leaderboard', label: t('nav.leaderboard'), icon: ChartIcon }] : []),
     ...(withDashboard ? [{ path: '/forum', label: t('nav.forum'), icon: ForumIcon }] : []),
-    ...(withDashboard ? [{ path: '/channel-contributions', label: t('contributions.title'), icon: GlobeIcon }] : []),
+    ...(withDashboard ? [{ path: '/channel-contributions', label: t('contributions.title'), icon: GlobeIcon },
+    { path: '/channel-quotas', label: t('contributions.quotas'), icon: GlobeIcon }] : []),
     { path: '/available-channels', label: t('nav.availableChannels'), icon: ChannelIcon, hideInSimpleMode: true, featureFlag: flagAvailableChannels },
     { path: '/monitor', label: t('nav.channelStatus'), icon: SignalIcon, featureFlag: flagChannelMonitor },
     { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagSubscription },
@@ -848,6 +851,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/leaderboard', label: t('nav.leaderboard'), icon: ChartIcon },
     { path: '/forum', label: t('nav.forum'), icon: ForumIcon },
     { path: '/channel-contributions', label: t('contributions.title'), icon: GlobeIcon },
+    { path: '/channel-quotas', label: t('contributions.quotas'), icon: GlobeIcon },
     { path: '/admin/audit-logs', label: t('nav.auditLogs'), icon: ShieldIcon, hideInSimpleMode: true }
   ]
 

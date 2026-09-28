@@ -90,6 +90,7 @@ type BatchImagePublicService struct {
 	ProviderRegistry  *BatchImageProviderRegistry
 	Pricing           BatchImagePricingResolver
 	BillingRepo       UsageBillingRepository
+	Concurrency       *ConcurrencyService
 	AuthCache         APIKeyAuthCacheInvalidator
 	Config            *config.Config
 }
@@ -182,7 +183,7 @@ type BatchImageItemsQuery struct {
 	Cursor string
 }
 
-func NewBatchImagePublicService(repo BatchImageRepository, accountRepo AccountRepository, groupRepo GroupRepository, userGroupRateRepo UserGroupRateRepository, queue BatchImageQueue, pricing *BatchImageModelPricingResolver, billingRepo UsageBillingRepository, authCache APIKeyAuthCacheInvalidator, cfg *config.Config) *BatchImagePublicService {
+func NewBatchImagePublicService(repo BatchImageRepository, accountRepo AccountRepository, groupRepo GroupRepository, userGroupRateRepo UserGroupRateRepository, queue BatchImageQueue, pricing *BatchImageModelPricingResolver, billingRepo UsageBillingRepository, authCache APIKeyAuthCacheInvalidator, cfg *config.Config, concurrency *ConcurrencyService) *BatchImagePublicService {
 	return &BatchImagePublicService{
 		Repo:              repo,
 		AccountRepo:       accountRepo,
@@ -192,6 +193,7 @@ func NewBatchImagePublicService(repo BatchImageRepository, accountRepo AccountRe
 		ProviderRegistry:  NewBatchImageProviderRegistryFromConfig(cfg),
 		Pricing:           pricing,
 		BillingRepo:       billingRepo,
+		Concurrency:       concurrency,
 		AuthCache:         authCache,
 		Config:            cfg,
 	}
@@ -234,6 +236,16 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 	provider, account, err := s.selectProviderAndAccount(ctx, owner, normalized.Provider, normalized.Model)
 	if err != nil {
 		return nil, err
+	}
+	if s.Concurrency != nil {
+		result, err := s.Concurrency.AcquireAccountSlot(ctx, account.ID, account.Concurrency)
+		if err != nil {
+			return nil, err
+		}
+		if !result.Acquired {
+			return nil, ErrBatchImageNoAccountAvailable
+		}
+		defer result.ReleaseFunc()
 	}
 	pricingSnapshot, err := s.resolvePricingSnapshot(ctx, owner, normalized, provider.Name(), account)
 	if err != nil {
@@ -967,7 +979,8 @@ func (s *BatchImagePublicService) selectProviderAndAccount(ctx context.Context, 
 	return nil, nil, ErrBatchImageNoAccountAvailable
 }
 
-func (s *BatchImagePublicService) listCandidateAccounts(ctx context.Context, groupID *int64, platform string) ([]Account, error) {
+func (s *BatchImagePublicService) listCandidateAccounts(ctx context.Context, groupID *int64, platform string) (out []Account, outErr error) {
+	defer func() { out = filterSharedQuotaAccounts(ctx, out) }()
 	if s.AccountRepo == nil {
 		return nil, ErrBatchImageNoAccountAvailable
 	}
@@ -1071,6 +1084,10 @@ func (s *BatchImagePublicService) resolvePricingSnapshot(ctx context.Context, ow
 	}
 	if accountMultiplier < 0 {
 		accountMultiplier = 0
+	}
+	// 独立渠道以账号成本计量，不叠加全站分组的下游倍率。
+	if SharedQuotaFromContext(ctx) != nil && account.HasIndependentContributionQuota() {
+		groupMultiplier = 1
 	}
 	standardUnitPrice := unit * groupMultiplier * accountMultiplier
 	billableUnitPrice := standardUnitPrice * discountMultiplier

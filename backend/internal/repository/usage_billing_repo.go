@@ -183,6 +183,18 @@ func (r *usageBillingRepository) applyBatchImageBalanceHold(
 }
 
 func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand, result *service.UsageBillingApplyResult) error {
+	if cmd.BillingType == service.BillingTypeContribution {
+		if cmd.BalanceCost != 0 || cmd.SubscriptionCost != 0 || cmd.APIKeyQuotaCost != 0 || cmd.APIKeyRateLimitCost != 0 || cmd.SharedQuotaWindowID != 0 || cmd.SharedQuotaCost != 0 {
+			return errors.New("独立渠道额度不能同时扣除全站或个人额度")
+		}
+		var approved bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM channel_contributions WHERE account_id=$1 AND status='approved')`, cmd.AccountID).Scan(&approved); err != nil {
+			return err
+		}
+		if !approved {
+			return errors.New("独立额度账号不是已审核贡献渠道")
+		}
+	}
 	if cmd.SharedQuotaCost < 0 || math.IsNaN(cmd.SharedQuotaCost) || math.IsInf(cmd.SharedQuotaCost, 0) || (cmd.SharedQuotaCost != 0 && cmd.SharedQuotaWindowID <= 0) {
 		return errors.New("共享计费金额或账期无效")
 	}
@@ -301,6 +313,9 @@ func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, am
 
 func reserveUsageBillingBatchImageBalance(ctx context.Context, tx *sql.Tx, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {
 	if q := service.SharedQuotaFromContext(ctx); q != nil {
+		if result, handled, err := reserveContributionBatch(ctx, tx, cmd); handled {
+			return result, err
+		}
 		return reserveSharedQuotaBatch(ctx, tx, cmd, q)
 	}
 	if cmd.HoldAmount <= 0 {

@@ -374,38 +374,38 @@ func normalizeUpdateGroupInputForSimpleMode(input *UpdateGroupInput) {
 	*input = UpdateGroupInput{Name: input.Name, Description: input.Description}
 }
 
-func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
+func (s *adminServiceImpl) PrepareGroup(ctx context.Context, input *CreateGroupInput) (*Group, []int64, error) {
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && NormalizeGroupPlatform(input.Platform) == PlatformComposite {
-		return nil, infraerrors.BadRequest("SIMPLE_MODE_GROUP_NOT_BINDABLE", "composite groups are not supported in simple mode")
+		return nil, nil, infraerrors.BadRequest("SIMPLE_MODE_GROUP_NOT_BINDABLE", "composite groups are not supported in simple mode")
 	}
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		normalizeCreateGroupInputForSimpleMode(input)
 	}
 	if input.RateMultiplier <= 0 {
-		return nil, errors.New("rate_multiplier must be > 0")
+		return nil, nil, errors.New("rate_multiplier must be > 0")
 	}
 
 	platform := NormalizeGroupPlatform(input.Platform)
 	// 固定账号 manifest 配置：账号绑定发生在创建之后，创建时无法校验成员关系，
 	// 拒绝开启并在创建后的编辑里配置。
 	if normalizeCodexModelsManifestConfig(platform, input.CodexModelsManifestConfig).Enabled {
-		return nil, infraerrors.New(http.StatusBadRequest, "INVALID_CODEX_MODELS_MANIFEST_CONFIG", "codex models manifest config cannot be enabled at group creation; configure it after creation in the group editor")
+		return nil, nil, infraerrors.New(http.StatusBadRequest, "INVALID_CODEX_MODELS_MANIFEST_CONFIG", "codex models manifest config cannot be enabled at group creation; configure it after creation in the group editor")
 	}
 	modelPricing, err := normalizeGroupModelPricing(platform, input.ModelPricing)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	maxReasoningEffort, err := normalizeMaxReasoningEffortForPlatform(platform, input.MaxReasoningEffort)
 	if err != nil {
-		return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_MAX_REASONING_EFFORT", "%v", err)
+		return nil, nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_MAX_REASONING_EFFORT", "%v", err)
 	}
 	maxReasoningEffortOverLimit, err := normalizeMaxReasoningEffortOverLimitForPlatform(platform, input.MaxReasoningEffortOverLimit)
 	if err != nil {
-		return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_MAX_REASONING_EFFORT_OVER_LIMIT", "%v", err)
+		return nil, nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_MAX_REASONING_EFFORT_OVER_LIMIT", "%v", err)
 	}
 	reasoningEffortMappings, err := NormalizeReasoningEffortMappings(platform, input.ReasoningEffortMappings)
 	if err != nil {
-		return nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_REASONING_EFFORT_MAPPING", "%v", err)
+		return nil, nil, infraerrors.Newf(http.StatusBadRequest, "INVALID_REASONING_EFFORT_MAPPING", "%v", err)
 	}
 
 	subscriptionType := input.SubscriptionType
@@ -433,33 +433,33 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	imageRateMultiplier := 1.0
 	if input.ImageRateMultiplier != nil {
 		if *input.ImageRateMultiplier < 0 {
-			return nil, errors.New("image_rate_multiplier must be >= 0")
+			return nil, nil, errors.New("image_rate_multiplier must be >= 0")
 		}
 		imageRateMultiplier = *input.ImageRateMultiplier
 	}
 	batchImageDiscountMultiplier := defaultBatchImageDiscountMultiplier
 	if input.BatchImageDiscountMultiplier != nil {
 		if *input.BatchImageDiscountMultiplier < 0 {
-			return nil, errors.New("batch_image_discount_multiplier must be >= 0")
+			return nil, nil, errors.New("batch_image_discount_multiplier must be >= 0")
 		}
 		batchImageDiscountMultiplier = *input.BatchImageDiscountMultiplier
 	}
 	batchImageHoldMultiplier := defaultBatchImageHoldMultiplier
 	if input.BatchImageHoldMultiplier != nil {
 		if *input.BatchImageHoldMultiplier < 0 {
-			return nil, errors.New("batch_image_hold_multiplier must be >= 0")
+			return nil, nil, errors.New("batch_image_hold_multiplier must be >= 0")
 		}
 		batchImageHoldMultiplier = *input.BatchImageHoldMultiplier
 	}
 	// 不变式：hold 比例 >= discount 比例。否则批量任务成功率足够高时
 	// 实际成本会超过冻结额，结算永远失败、用户冻结余额无法解冻。
 	if batchImageHoldMultiplier < batchImageDiscountMultiplier {
-		return nil, errors.New("batch_image_hold_multiplier must be >= batch_image_discount_multiplier")
+		return nil, nil, errors.New("batch_image_hold_multiplier must be >= batch_image_discount_multiplier")
 	}
 	videoRateMultiplier := 1.0
 	if input.VideoRateMultiplier != nil {
 		if *input.VideoRateMultiplier < 0 {
-			return nil, errors.New("video_rate_multiplier must be >= 0")
+			return nil, nil, errors.New("video_rate_multiplier must be >= 0")
 		}
 		videoRateMultiplier = *input.VideoRateMultiplier
 	}
@@ -471,7 +471,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	// 先归一化（非订阅分组清空高峰配置、清洗停用状态下的脏字段）再校验，与 UpdateGroup 同一收口。
 	peakRateEnabled, peakStart, peakEnd, peakRateMultiplier := NormalizePeakRateConfig(subscriptionType, input.PeakRateEnabled, input.PeakStart, input.PeakEnd, peakRateMultiplier)
 	if err := ValidatePeakRateConfig(subscriptionType, peakRateEnabled, peakStart, peakEnd, peakRateMultiplier); err != nil {
-		return nil, infraerrors.BadRequest("INVALID_PEAK_RATE_CONFIG", err.Error())
+		return nil, nil, infraerrors.BadRequest("INVALID_PEAK_RATE_CONFIG", err.Error())
 	}
 
 	profitMinMargin := 0.0
@@ -485,13 +485,13 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	// 利润控制与高峰倍率同一收口顺序：先按平台归一化（不支持的平台重置），再校验。
 	profitControlEnabled, profitMinMargin, profitSafetyBuffer := NormalizeProfitControlConfig(platform, input.ProfitControlEnabled, profitMinMargin, profitSafetyBuffer)
 	if err := ValidateProfitControlConfig(platform, profitControlEnabled, profitMinMargin, profitSafetyBuffer); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// 校验降级分组
 	if input.FallbackGroupID != nil {
 		if err := s.validateFallbackGroup(ctx, 0, *input.FallbackGroupID); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	fallbackOnInvalidRequest := input.FallbackGroupIDOnInvalidRequest
@@ -501,7 +501,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	// 校验无效请求兜底分组
 	if fallbackOnInvalidRequest != nil {
 		if err := s.validateFallbackGroupOnInvalidRequest(ctx, 0, platform, subscriptionType, *fallbackOnInvalidRequest); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -531,10 +531,10 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		for _, srcGroupID := range uniqueSourceGroupIDs {
 			srcGroup, err := s.groupRepo.GetByIDLite(ctx, srcGroupID)
 			if err != nil {
-				return nil, fmt.Errorf("source group %d not found: %w", srcGroupID, err)
+				return nil, nil, fmt.Errorf("source group %d not found: %w", srcGroupID, err)
 			}
 			if !canCopyAccountsFromGroupPlatform(platform, srcGroup.Platform) {
-				return nil, fmt.Errorf("source group %d platform mismatch: expected %s, got %s", srcGroupID, platform, srcGroup.Platform)
+				return nil, nil, fmt.Errorf("source group %d platform mismatch: expected %s, got %s", srcGroupID, platform, srcGroup.Platform)
 			}
 		}
 
@@ -542,14 +542,14 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		var err error
 		accountIDsToCopy, err = s.groupRepo.GetAccountIDsByGroupIDs(ctx, uniqueSourceGroupIDs)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get accounts from source groups: %w", err)
+			return nil, nil, fmt.Errorf("failed to get accounts from source groups: %w", err)
 		}
 	}
 
 	// 白名单在创建路径同样收口：开启但为空、通配位置非法都会 400。
 	modelAllowlist, err := normalizeGroupModelAllowlist(input.ModelAllowlist)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	group := &Group{
@@ -596,6 +596,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		FallbackGroupID:                 input.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: fallbackOnInvalidRequest,
 		ModelRouting:                    input.ModelRouting,
+		ModelRoutingEnabled:             input.ModelRoutingEnabled,
 		MCPXMLInject:                    mcpXMLInject,
 		SupportedModelScopes:            input.SupportedModelScopes,
 		AllowMessagesDispatch:           input.AllowMessagesDispatch,
@@ -621,15 +622,11 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		group.AllowLive = false
 	}
 	sanitizeGroupReasoningEffortPolicy(group)
-	if err := s.groupRepo.Create(ctx, group); err != nil {
-		return nil, err
-	}
-
 	// require_oauth_only: 过滤掉 apikey 类型账号
 	if group.RequireOAuthOnly && groupSupportsOAuthOnlyFilter(group.Platform) && len(accountIDsToCopy) > 0 {
 		accounts, err := s.accountRepo.GetByIDs(ctx, accountIDsToCopy)
 		if err != nil {
-			return nil, fmt.Errorf("failed to fetch accounts for oauth filter: %w", err)
+			return nil, nil, fmt.Errorf("failed to fetch accounts for oauth filter: %w", err)
 		}
 		oauthIDs := make(map[int64]struct{}, len(accounts))
 		for _, acc := range accounts {
@@ -644,6 +641,18 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 			}
 		}
 		accountIDsToCopy = filtered
+	}
+
+	return group, accountIDsToCopy, nil
+}
+
+func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
+	group, accountIDsToCopy, err := s.PrepareGroup(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.groupRepo.Create(ctx, group); err != nil {
+		return nil, err
 	}
 
 	// 如果有需要复制的账号，绑定到新分组

@@ -295,6 +295,9 @@ func reserveSharedQuotaBatch(ctx context.Context, tx *sql.Tx, cmd *service.Batch
 
 // 从持久化冻结记录找原账期，跨日或停用插件不会改扣个人余额。
 func settleSharedQuotaBatch(ctx context.Context, tx *sql.Tx, cmd *service.BatchImageBalanceHoldCommand, capture bool) (*service.BatchImageBalanceHoldResult, bool, error) {
+	if result, handled, err := settleContributionBatch(ctx, tx, cmd, capture); handled {
+		return result, handled, err
+	}
 	var window int64
 	var held float64
 	var settled bool
@@ -341,6 +344,14 @@ func settleSharedQuotaBatch(ctx context.Context, tx *sql.Tx, cmd *service.BatchI
 }
 
 func (r *usageBillingRepository) BatchSharedQuota(ctx context.Context, batchID string) (*service.SharedQuotaSnapshot, error) {
+	var accountID int64
+	contributionErr := r.db.QueryRowContext(ctx, `SELECT account_id FROM channel_contribution_batch_holds WHERE batch_id=$1`, batchID).Scan(&accountID)
+	if contributionErr == nil {
+		return &service.SharedQuotaSnapshot{ContributionAccountID: accountID}, nil
+	}
+	if !errors.Is(contributionErr, sql.ErrNoRows) {
+		return nil, contributionErr
+	}
 	var id, groupID int64
 	err := r.db.QueryRowContext(ctx, `SELECT window_id,group_id FROM shared_quota_batch_holds WHERE batch_id=$1`, batchID).Scan(&id, &groupID)
 	if errors.Is(err, sql.ErrNoRows) {

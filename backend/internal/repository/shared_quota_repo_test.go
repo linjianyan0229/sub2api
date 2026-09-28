@@ -50,6 +50,7 @@ func TestSharedQuotaBatchSettlementUsesPersistedHold(t *testing.T) {
 	m.ExpectBegin()
 	tx, err := db.Begin()
 	require.NoError(t, err)
+	m.ExpectQuery("SELECT account_id FROM channel_contribution_batch_holds").WithArgs("batch-1").WillReturnError(sql.ErrNoRows)
 	m.ExpectQuery("SELECT window_id,amount,settled").WithArgs("batch-1").WillReturnRows(sqlmock.NewRows([]string{"window_id", "amount", "settled", "group_id"}).AddRow(7, 10, false, 0))
 	m.ExpectExec(regexp.QuoteMeta("UPDATE shared_quota_windows SET held=held-$1,used=used+$2 WHERE id=$3")).WithArgs(10.0, 4.0, int64(7)).WillReturnResult(sqlmock.NewResult(0, 1))
 	m.ExpectExec("UPDATE shared_quota_batch_holds SET settled=TRUE").WithArgs("batch-1").WillReturnResult(sqlmock.NewResult(0, 1))

@@ -33,6 +33,7 @@ func RegisterAdminRoutes(
 		contributions := admin.Group("/channel-contributions")
 		contributions.GET("", h.Contributions.AdminList)
 		contributions.POST("/:id/review", h.Contributions.Review)
+		contributions.POST("/:id/models", h.Contributions.Models)
 
 		forum := admin.Group("/forum")
 		forum.PATCH("/settings", h.Forum.Settings)

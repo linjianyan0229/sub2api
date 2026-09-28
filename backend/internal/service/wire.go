@@ -465,8 +465,18 @@ func ProvideDeferredService(accountRepo AccountRepository, timingWheel *TimingWh
 }
 
 // ProvideConcurrencyService creates ConcurrencyService and starts slot cleanup worker.
-func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, cfg *config.Config) *ConcurrencyService {
+func ProvideChannelContributionService(repo ChannelContributionRepository, encryptor SecretEncryptor, keys *APIKeyService, models *AccountTestService, admin AdminService, cfg *config.Config) *ChannelContributionService {
+	svc := NewChannelContributionService(repo, encryptor, keys)
+	svc.modelFetcher, svc.timezone = models, cfg.Timezone
+	svc.groupPreparer, _ = admin.(interface {
+		PrepareGroup(context.Context, *CreateGroupInput) (*Group, []int64, error)
+	})
+	return svc
+}
+
+func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, contributions ContributionAdmissionRepository, cfg *config.Config) *ConcurrencyService {
 	svc := NewConcurrencyService(cache)
+	svc.contributionAdmission = contributions
 	if err := svc.CleanupStaleProcessSlots(context.Background()); err != nil {
 		logger.LegacyPrintf("service.concurrency", "Warning: startup cleanup stale process slots failed: %v", err)
 	}
@@ -862,7 +872,7 @@ func ProvideUserService(userRepo UserRepository, settingRepo SettingRepository, 
 
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
-	NewChannelContributionService,
+	ProvideChannelContributionService,
 	ProvideForumService,
 	// Core services
 	ProvideAuthService,

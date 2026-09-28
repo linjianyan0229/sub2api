@@ -229,7 +229,8 @@ const (
 
 // ConcurrencyService 管理账号和用户的并发限制。
 type ConcurrencyService struct {
-	cache ConcurrencyCache
+	cache                 ConcurrencyCache
+	contributionAdmission ContributionAdmissionRepository
 
 	accountLoadCacheTTL atomic.Int64
 	accountLoadCacheMu  sync.RWMutex
@@ -342,6 +343,15 @@ type UserLoadInfo struct {
 func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {
 	// If maxConcurrency is 0 or negative, no limit
 	if maxConcurrency <= 0 {
+		if s.contributionAdmission != nil {
+			allowed, err := s.contributionAdmission.AdmitContributionAccount(ctx, accountID, SharedQuotaFromContext(ctx))
+			if err != nil {
+				return nil, err
+			}
+			if !allowed {
+				return &AcquireResult{Acquired: false}, nil
+			}
+		}
 		return &AcquireResult{
 			Acquired:    true,
 			ReleaseFunc: func() {}, // no-op
@@ -357,6 +367,20 @@ func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID i
 	}
 
 	if acquired {
+		if s.contributionAdmission != nil {
+			allowed, admissionErr := s.contributionAdmission.AdmitContributionAccount(ctx, accountID, SharedQuotaFromContext(ctx))
+			if admissionErr != nil || !allowed {
+				releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if releaseErr := s.cache.ReleaseAccountSlot(releaseCtx, accountID, requestID); releaseErr != nil {
+					return nil, releaseErr
+				}
+				if admissionErr != nil {
+					return nil, admissionErr
+				}
+				return &AcquireResult{Acquired: false}, nil
+			}
+		}
 		return &AcquireResult{
 			Acquired: true,
 			ReleaseFunc: func() {

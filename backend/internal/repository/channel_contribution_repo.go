@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -44,17 +45,27 @@ func requireContributionAdmin(ctx context.Context, exec sqlExecutor, actor int64
 }
 
 const contributionSelect = `SELECT c.id,c.user_id,COALESCE(u.username,''),c.site_name,c.base_url,c.platform,
-c.requested_group_id,c.new_group_name,COALESCE(g.name,''),c.status,c.review_note,c.reviewed_at,c.group_id,c.account_id,c.created_at`
+c.requested_group_id,c.new_group_name,COALESCE(g.name,''),c.status,c.review_note,c.reviewed_at,c.group_id,c.account_id,c.created_at,c.settings`
 const contributionJoins = ` FROM channel_contributions c LEFT JOIN users u ON u.id=c.user_id AND u.deleted_at IS NULL
 LEFT JOIN groups g ON g.id=c.requested_group_id AND g.deleted_at IS NULL `
 
 func scanContribution(rows *sql.Rows, secret bool) (*service.ChannelContribution, error) {
 	c := &service.ChannelContribution{}
-	dest := []any{&c.ID, &c.UserID, &c.ContributorName, &c.SiteName, &c.BaseURL, &c.Platform, &c.RequestedGroupID, &c.NewGroupName, &c.RequestedGroupName, &c.Status, &c.ReviewNote, &c.ReviewedAt, &c.GroupID, &c.AccountID, &c.CreatedAt}
+	var settings []byte
+	dest := []any{&c.ID, &c.UserID, &c.ContributorName, &c.SiteName, &c.BaseURL, &c.Platform, &c.RequestedGroupID, &c.NewGroupName, &c.RequestedGroupName, &c.Status, &c.ReviewNote, &c.ReviewedAt, &c.GroupID, &c.AccountID, &c.CreatedAt, &settings}
 	if secret {
 		dest = append(dest, &c.KeyEncrypted)
 	}
 	err := rows.Scan(dest...)
+	if err == nil {
+		err = json.Unmarshal(settings, &c.ContributionSettings)
+	}
+	if c.Concurrency == 0 {
+		c.Concurrency = 5
+	}
+	if c.Models == nil {
+		c.Models = []string{}
+	}
 	c.ContributorName = service.ForumDisplayName(c.ContributorName)
 	return c, err
 }
@@ -86,8 +97,12 @@ func (r *channelContributionRepository) Submit(ctx context.Context, user int64, 
 			return err
 		}
 	}
-	err = tx.QueryRowContext(ctx, `INSERT INTO channel_contributions(user_id,site_name,base_url,platform,key_encrypted,requested_group_id,new_group_name)
-VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id,created_at,status`, user, c.SiteName, c.BaseURL, c.Platform, c.KeyEncrypted, c.RequestedGroupID, c.NewGroupName).Scan(&c.ID, &c.CreatedAt, &c.Status)
+	settings, err := json.Marshal(c.ContributionSettings)
+	if err != nil {
+		return err
+	}
+	err = tx.QueryRowContext(ctx, `INSERT INTO channel_contributions(user_id,site_name,base_url,platform,key_encrypted,requested_group_id,new_group_name,settings)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,created_at,status`, user, c.SiteName, c.BaseURL, c.Platform, c.KeyEncrypted, c.RequestedGroupID, c.NewGroupName, string(settings)).Scan(&c.ID, &c.CreatedAt, &c.Status)
 	if err != nil {
 		return err
 	}
@@ -180,11 +195,23 @@ func (r *channelContributionRepository) Review(ctx context.Context, actor int64,
 				return service.ErrContributionGroup
 			}
 			// 沿用 Ent 分组默认值：公开标准分组、倍率 1，不复制其他组权限或价格。
-			g, err := client.Group.Create().SetName(c.NewGroupName).SetPlatform(c.Platform).Save(ctx)
-			if err != nil {
-				return translatePersistenceError(err, nil, service.ErrGroupExists)
+			if c.PreparedGroup != nil {
+				if err := createGroupRecord(ctx, client, c.PreparedGroup); err != nil {
+					return translatePersistenceError(err, nil, service.ErrGroupExists)
+				}
+				groupID = &c.PreparedGroup.ID
+				if len(c.CopyAccountIDs) > 0 {
+					if err := newGroupRepositoryWithSQL(client, client).BindAccountsToGroup(ctx, *groupID, c.CopyAccountIDs); err != nil {
+						return err
+					}
+				}
+			} else {
+				g, err := client.Group.Create().SetName(c.NewGroupName).SetPlatform(c.Platform).Save(ctx)
+				if err != nil {
+					return translatePersistenceError(err, nil, service.ErrGroupExists)
+				}
+				groupID = &g.ID
 			}
-			groupID = &g.ID
 			if err := enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventGroupChanged, nil, groupID, nil); err != nil {
 				return err
 			}
@@ -197,7 +224,11 @@ func (r *channelContributionRepository) Review(ctx context.Context, actor int64,
 		accountID = &account.ID
 		status = "approved"
 	}
-	_, err = client.ExecContext(ctx, `UPDATE channel_contributions SET status=$2,review_note=$3,reviewed_by=$4,reviewed_at=NOW(),updated_at=NOW(),group_id=$5,account_id=$6,key_encrypted='' WHERE id=$1`, c.ID, status, note, actor, groupID, accountID)
+	settings, err := json.Marshal(c.ContributionSettings)
+	if err != nil {
+		return err
+	}
+	_, err = client.ExecContext(ctx, `UPDATE channel_contributions SET status=$2,review_note=$3,reviewed_by=$4,reviewed_at=NOW(),updated_at=NOW(),group_id=$5,account_id=$6,key_encrypted='',settings=$7 WHERE id=$1`, c.ID, status, note, actor, groupID, accountID, string(settings))
 	if err != nil {
 		return err
 	}
@@ -224,6 +255,27 @@ LEFT JOIN users u ON u.id=c.user_id AND u.deleted_at IS NULL WHERE c.status='app
 		}
 		item.ContributorName = service.ForumDisplayName(item.ContributorName)
 		out[id] = append(out[id], item)
+	}
+	return out, rows.Err()
+}
+
+func (r *channelContributionRepository) GroupAccounts(ctx context.Context, ids []int64) (map[int64][]service.ContributionAccountOption, error) {
+	out := map[int64][]service.ContributionAccountOption{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT ag.group_id,a.id,COALESCE(c.site_name,'#' || a.id::text) FROM accounts a JOIN account_groups ag ON ag.account_id=a.id LEFT JOIN channel_contributions c ON c.account_id=a.id AND c.status='approved' WHERE ag.group_id=ANY($1) AND a.deleted_at IS NULL ORDER BY a.id`, pq.Array(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var group int64
+		var item service.ContributionAccountOption
+		if err := rows.Scan(&group, &item.ID, &item.Name); err != nil {
+			return nil, err
+		}
+		out[group] = append(out[group], item)
 	}
 	return out, rows.Err()
 }

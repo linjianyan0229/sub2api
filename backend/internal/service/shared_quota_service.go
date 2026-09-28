@@ -17,15 +17,17 @@ var ErrSharedGroupQuotaExhausted = infraerrors.TooManyRequests("SHARED_GROUP_QUO
 var ErrSharedQuotaPolicyChanged = errors.New("共享额度配置已变更")
 
 type SharedQuotaSnapshot struct {
-	WindowID   int64             `json:"window_id"`
-	Total      float64           `json:"total"`
-	Used       float64           `json:"used"`
-	Held       float64           `json:"held"`
-	Remaining  float64           `json:"remaining"`
-	ResetsAt   time.Time         `json:"resets_at"`
-	Timezone   string            `json:"timezone"`
-	GroupID    int64             `json:"group_id,omitempty"`
-	GroupQuota *SharedGroupQuota `json:"group_quota,omitempty"`
+	ContributionAccountID int64             `json:"contribution_account_id,omitempty"`
+	IndependentAccountIDs []int64           `json:"independent_account_ids,omitempty"`
+	WindowID              int64             `json:"window_id"`
+	Total                 float64           `json:"total"`
+	Used                  float64           `json:"used"`
+	Held                  float64           `json:"held"`
+	Remaining             float64           `json:"remaining"`
+	ResetsAt              time.Time         `json:"resets_at"`
+	Timezone              string            `json:"timezone"`
+	GroupID               int64             `json:"group_id,omitempty"`
+	GroupQuota            *SharedGroupQuota `json:"group_quota,omitempty"`
 }
 
 type SharedGroupQuota struct {
@@ -36,6 +38,13 @@ type SharedGroupQuota struct {
 }
 
 func (q *SharedQuotaSnapshot) CheckRemaining() error {
+	if len(q.IndependentAccountIDs) > 0 {
+		return nil
+	}
+	return q.CheckPoolRemaining()
+}
+
+func (q *SharedQuotaSnapshot) CheckPoolRemaining() error {
 	if q.Remaining <= 0 {
 		return ErrSharedQuotaExhausted
 	}
@@ -144,6 +153,7 @@ func (s *SharedQuotaService) Check(ctx context.Context, snapshot *SharedQuotaSna
 	if err != nil {
 		return ErrBillingServiceUnavailable.WithCause(err)
 	}
+	w.IndependentAccountIDs = snapshot.IndependentAccountIDs
 	return w.CheckRemaining()
 }
 
@@ -166,6 +176,16 @@ func (s *APIKeyService) BindSharedQuota(ctx context.Context, key *APIKey) (*APIK
 	w, err := s.sharedQuota.snapshotForGroup(ctx, key.User, valueOrZero(key.GroupID))
 	if err != nil {
 		return nil, err
+	}
+	if w != nil && w.GroupID > 0 {
+		if source, ok := s.sharedQuota.repo.(interface {
+			IndependentContributionAccounts(context.Context, int64) ([]int64, error)
+		}); ok {
+			w.IndependentAccountIDs, err = source.IndependentContributionAccounts(ctx, w.GroupID)
+			if err != nil {
+				return nil, ErrBillingServiceUnavailable.WithCause(err)
+			}
+		}
 	}
 	k := *key
 	u := *key.User

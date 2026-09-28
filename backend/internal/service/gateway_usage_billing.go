@@ -318,6 +318,19 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 	}
 
 	if p.User.SharedQuota != nil && !p.User.IsAdmin() {
+		if p.Account.HasIndependentContributionQuota() {
+			cmd.BillingType = BillingTypeContribution
+			cmd.SubscriptionID = nil
+			cmd.AccountQuotaCost = QuantizeUsageBillingAmount(p.Cost.TotalCost * p.AccountRateMultiplier)
+			if usageLog != nil {
+				usageLog.ActualCost = cmd.AccountQuotaCost
+				usageLog.RateMultiplier = p.AccountRateMultiplier
+				usageLog.SubscriptionID = nil
+				usageLog.BillingType = BillingTypeContribution
+			}
+			cmd.Normalize()
+			return cmd
+		}
 		cmd.SharedQuotaWindowID = p.User.SharedQuota.WindowID
 		cmd.SharedQuotaGroupID = p.User.SharedQuota.GroupID
 		cmd.SharedQuotaCost = p.Cost.ActualCost

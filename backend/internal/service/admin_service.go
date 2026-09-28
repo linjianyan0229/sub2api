@@ -233,83 +233,83 @@ type AdminBoundAuthIdentityChannel struct {
 }
 
 type CreateGroupInput struct {
-	Name                      string
-	Description               string
-	Platform                  string
-	RateMultiplier            float64
-	IsExclusive               bool
-	SubscriptionType          string   // standard/subscription
-	DailyLimitUSD             *float64 // 日限额 (USD)
-	WeeklyLimitUSD            *float64 // 周限额 (USD)
-	MonthlyLimitUSD           *float64 // 月限额 (USD)
-	LongContextPricingEnabled bool
-	ModelPricing              []ChannelModelPricing
+	Name                      string                `json:"name"`
+	Description               string                `json:"description"`
+	Platform                  string                `json:"platform"`
+	RateMultiplier            float64               `json:"rate_multiplier"`
+	IsExclusive               bool                  `json:"is_exclusive"`
+	SubscriptionType          string                `json:"subscription_type"` // standard/subscription
+	DailyLimitUSD             *float64              `json:"daily_limit_usd"`   // 日限额 (USD)
+	WeeklyLimitUSD            *float64              `json:"weekly_limit_usd"`  // 周限额 (USD)
+	MonthlyLimitUSD           *float64              `json:"monthly_limit_usd"` // 月限额 (USD)
+	LongContextPricingEnabled bool                  `json:"long_context_pricing_enabled"`
+	ModelPricing              []ChannelModelPricing `json:"model_pricing"`
 	// 图片生成计费配置（仅 antigravity 平台使用）
-	AllowImageGeneration         bool
-	AllowBatchImageGeneration    bool
-	ImageRateIndependent         bool
-	ImageRateMultiplier          *float64
-	BatchImageDiscountMultiplier *float64
-	BatchImageHoldMultiplier     *float64
-	VideoRateIndependent         bool
-	VideoRateMultiplier          *float64
+	AllowImageGeneration         bool     `json:"allow_image_generation"`
+	AllowBatchImageGeneration    bool     `json:"allow_batch_image_generation"`
+	ImageRateIndependent         bool     `json:"image_rate_independent"`
+	ImageRateMultiplier          *float64 `json:"image_rate_multiplier"`
+	BatchImageDiscountMultiplier *float64 `json:"batch_image_discount_multiplier"`
+	BatchImageHoldMultiplier     *float64 `json:"batch_image_hold_multiplier"`
+	VideoRateIndependent         bool     `json:"video_rate_independent"`
+	VideoRateMultiplier          *float64 `json:"video_rate_multiplier"`
 	// 高峰时段倍率配置（PeakRateMultiplier 为 nil 时按 1.0 处理）
-	PeakRateEnabled    bool
-	PeakStart          string
-	PeakEnd            string
-	PeakRateMultiplier *float64
-	ImagePrice1K       *float64
-	ImagePrice2K       *float64
-	ImagePrice4K       *float64
-	VideoPrice480P     *float64
-	VideoPrice720P     *float64
-	VideoPrice1080P    *float64
+	PeakRateEnabled    bool     `json:"peak_rate_enabled"`
+	PeakStart          string   `json:"peak_start"`
+	PeakEnd            string   `json:"peak_end"`
+	PeakRateMultiplier *float64 `json:"peak_rate_multiplier"`
+	ImagePrice1K       *float64 `json:"image_price_1k"`
+	ImagePrice2K       *float64 `json:"image_price_2k"`
+	ImagePrice4K       *float64 `json:"image_price_4k"`
+	VideoPrice480P     *float64 `json:"video_price_480p"`
+	VideoPrice720P     *float64 `json:"video_price_720p"`
+	VideoPrice1080P    *float64 `json:"video_price_1080p"`
 	// VideoModelPrices 可选按模型族×分辨率覆盖视频每秒单价。
-	VideoModelPrices map[string]map[string]float64
+	VideoModelPrices map[string]map[string]float64 `json:"video_model_prices"`
 	// Codex alpha/search 网页搜索单次价格（USD/次，仅 openai 平台使用）；nil/负数按默认价 0.01 处理
-	WebSearchPricePerCall *float64
+	WebSearchPricePerCall *float64 `json:"web_search_price_per_call"`
 	// 搜索工具单价 per 1k
-	SearchPricePer1k *float64
+	SearchPricePer1k *float64 `json:"search_price_per_1k"`
 	// Grok Voice 显式定价（分组级）
-	AudioRealtimePricePerMin     *float64
-	AudioTTSPricePerMillionChars *float64
-	AudioSTTPricePerHour         *float64
-	ClaudeCodeOnly               bool   // 仅允许 Claude Code 客户端
-	FallbackGroupID              *int64 // 降级分组 ID
+	AudioRealtimePricePerMin     *float64 `json:"audio_realtime_price_per_min"`
+	AudioTTSPricePerMillionChars *float64 `json:"audio_tts_price_per_million_chars"`
+	AudioSTTPricePerHour         *float64 `json:"audio_stt_price_per_hour"`
+	ClaudeCodeOnly               bool     `json:"claude_code_only"`  // 仅允许 Claude Code 客户端
+	FallbackGroupID              *int64   `json:"fallback_group_id"` // 降级分组 ID
 	// 无效请求兜底分组 ID（仅 anthropic 平台使用）
-	FallbackGroupIDOnInvalidRequest *int64
+	FallbackGroupIDOnInvalidRequest *int64 `json:"fallback_group_id_on_invalid_request"`
 	// 模型路由配置（仅 anthropic 平台使用）
-	ModelRouting        map[string][]int64
-	ModelRoutingEnabled bool // 是否启用模型路由
-	MCPXMLInject        *bool
+	ModelRouting        map[string][]int64 `json:"model_routing"`
+	ModelRoutingEnabled bool               `json:"model_routing_enabled"` // 是否启用模型路由
+	MCPXMLInject        *bool              `json:"mcp_xml_inject"`
 	// 支持的模型系列（仅 antigravity 平台使用）
-	SupportedModelScopes []string
+	SupportedModelScopes []string `json:"supported_model_scopes"`
 	// OpenAI Messages 调度配置（仅 openai 平台使用）
-	AllowMessagesDispatch       bool
-	AllowLive                   bool
-	ForceOpenAIFast             bool
-	FreeOpenAIFast              bool
-	DefaultMappedModel          string
-	RequireOAuthOnly            bool
-	RequirePrivacySet           bool
-	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig
-	ModelAllowlist              GroupModelAllowlist
+	AllowMessagesDispatch       bool                              `json:"allow_messages_dispatch"`
+	AllowLive                   bool                              `json:"allow_live"`
+	ForceOpenAIFast             bool                              `json:"force_openai_fast"`
+	FreeOpenAIFast              bool                              `json:"free_openai_fast"`
+	DefaultMappedModel          string                            `json:"default_mapped_model"`
+	RequireOAuthOnly            bool                              `json:"require_oauth_only"`
+	RequirePrivacySet           bool                              `json:"require_privacy_set"`
+	MessagesDispatchModelConfig OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config"`
+	ModelAllowlist              GroupModelAllowlist               `json:"model_allowlist"`
 	// CodexModelsManifestConfig 固定账号 manifest 配置；创建路径禁止开启，仅编辑可配置。
-	CodexModelsManifestConfig GroupCodexModelsManifestConfig
+	CodexModelsManifestConfig GroupCodexModelsManifestConfig `json:"codex_models_manifest_config"`
 	// RPMLimit 分组 RPM 上限（0 = 不限制）
-	RPMLimit int
+	RPMLimit int `json:"rpm_limit"`
 	// MaxReasoningEffort Anthropic/OpenAI 请求的推理强度上限，空字符串表示不限制。
-	MaxReasoningEffort string
+	MaxReasoningEffort string `json:"max_reasoning_effort"`
 	// MaxReasoningEffortOverLimit 超过上限时的访问控制：downgrade（默认）或 deny。
-	MaxReasoningEffortOverLimit string
+	MaxReasoningEffortOverLimit string `json:"max_reasoning_effort_over_limit"`
 	// ReasoningEffortMappings Anthropic/OpenAI 推理强度映射，可按模型精确名、前缀或后缀限定。
-	ReasoningEffortMappings []ReasoningEffortMapping
+	ReasoningEffortMappings []ReasoningEffortMapping `json:"reasoning_effort_mappings"`
 	// 分组利润控制（五个 token 平台分组可启用；margin/buffer 为小数，nil 按 0 处理）
-	ProfitControlEnabled bool
-	ProfitMinMargin      *float64
-	ProfitSafetyBuffer   *float64
+	ProfitControlEnabled bool     `json:"profit_control_enabled"`
+	ProfitMinMargin      *float64 `json:"profit_min_margin"`
+	ProfitSafetyBuffer   *float64 `json:"profit_safety_buffer"`
 	// 从指定分组复制账号（创建分组后在同一事务内绑定）
-	CopyAccountsFromGroupIDs []int64
+	CopyAccountsFromGroupIDs []int64 `json:"copy_accounts_from_group_ids"`
 }
 
 type UpdateGroupInput struct {

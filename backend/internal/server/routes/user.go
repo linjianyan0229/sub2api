@@ -29,6 +29,7 @@ func RegisterUserRoutes(
 		contributions.GET("", h.Contributions.Mine)
 		contributions.POST("", h.Contributions.Submit)
 		contributions.GET("/groups", h.Contributions.Groups)
+		contributions.GET("/quotas", h.Contributions.Quotas)
 
 		forum := authenticated.Group("/forum")
 		forum.GET("", h.Forum.Page)

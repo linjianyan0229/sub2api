@@ -10,6 +10,7 @@ const (
 	BillingTypeBalance      int8 = 0 // 钱包余额
 	BillingTypeSubscription int8 = 1 // 订阅套餐
 	BillingTypeSharedQuota  int8 = 2 // 全站共享额度
+	BillingTypeContribution int8 = 3 // 贡献渠道独立额度
 )
 
 type RequestType int16

@@ -30,7 +30,9 @@ func newContributionFixture(t *testing.T) contributionFixture {
 	f.repo = NewChannelContributionRepository(integrationEntClient, integrationDB)
 	users := NewUserRepository(integrationEntClient, integrationDB)
 	keys := service.NewAPIKeyService(nil, users, NewGroupRepository(integrationEntClient, integrationDB), NewUserSubscriptionRepository(integrationEntClient), nil, nil, &config.Config{})
-	f.svc = service.NewChannelContributionService(f.repo, &AESEncryptor{key: make([]byte, 32)}, keys)
+	admin := service.NewAdminService(&config.Config{}, users, NewAdminGroupRepository(integrationEntClient, integrationDB), NewAccountRepository(integrationEntClient, integrationDB, nil).(service.AdminAccountRepository),
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, integrationEntClient, nil, nil, NewUserSubscriptionRepository(integrationEntClient), nil, nil, nil, nil, nil, nil)
+	f.svc = service.ProvideChannelContributionService(f.repo, &AESEncryptor{key: make([]byte, 32)}, keys, nil, admin, &config.Config{Timezone: "UTC"})
 	ids := []*int64{&f.admin, &f.user, &f.other}
 	for i, id := range ids {
 		role := service.RoleUser
@@ -43,6 +45,9 @@ func newContributionFixture(t *testing.T) contributionFixture {
 	}
 	t.Cleanup(func() {
 		for _, query := range []string{
+			`DELETE FROM channel_contribution_batch_holds WHERE account_id IN (SELECT id FROM accounts WHERE name LIKE $1)`,
+			`DELETE FROM batch_image_jobs WHERE account_id IN (SELECT id FROM accounts WHERE name LIKE $1)`,
+			`DELETE FROM api_keys WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)`,
 			`DELETE FROM channel_contributions WHERE site_name LIKE $1`,
 			`DELETE FROM account_groups WHERE account_id IN (SELECT id FROM accounts WHERE name LIKE $1)`,
 			`DELETE FROM accounts WHERE name LIKE $1`,

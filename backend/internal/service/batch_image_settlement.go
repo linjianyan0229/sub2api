@@ -291,8 +291,11 @@ func (s *BatchImageSettlementService) recordUsageLog(ctx context.Context, job *B
 		SessionID:             job.SessionID,
 		CreatedAt:             createdAt,
 	}
-	if SharedQuotaFromContext(ctx) != nil {
+	if q := SharedQuotaFromContext(ctx); q != nil {
 		usageLog.BillingType = BillingTypeSharedQuota
+		if q.ContributionAccountID > 0 {
+			usageLog.BillingType = BillingTypeContribution
+		}
 	}
 	writeUsageLogBestEffort(ctx, s.UsageLogRepo, usageLog, "service.batch_image_settlement")
 }

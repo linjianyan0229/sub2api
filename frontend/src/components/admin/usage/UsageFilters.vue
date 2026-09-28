@@ -289,6 +289,7 @@ const billingTypeOptions = ref<SelectOption[]>([
   { value: null, label: t('admin.usage.allBillingTypes') },
   { value: 2, label: t('common.sharedQuota') },
   { value: 0, label: t('admin.usage.billingTypeBalance') },
+  { value: 3, label: t('contributions.quotas') },
   { value: 1, label: t('admin.usage.billingTypeSubscription') }
 ])
 

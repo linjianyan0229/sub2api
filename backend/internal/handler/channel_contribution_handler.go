@@ -32,7 +32,7 @@ func (h *ChannelContributionHandler) Submit(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16384)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 65536)
 	var body service.ChannelContributionInput
 	if c.ShouldBindJSON(&body) != nil {
 		response.BadRequest(c, "申请格式无效")
@@ -81,8 +81,13 @@ func (h *ChannelContributionHandler) Groups(c *gin.Context) {
 		return
 	}
 	out := make([]gin.H, 0, len(groups))
+	accounts, err := h.service.GroupAccounts(c.Request.Context(), groups)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	for _, g := range groups {
-		out = append(out, gin.H{"id": g.ID, "name": g.Name, "platform": g.Platform})
+		out = append(out, gin.H{"id": g.ID, "name": g.Name, "platform": g.Platform, "accounts": accounts[g.ID]})
 	}
 	response.Success(c, out)
 }
@@ -97,18 +102,59 @@ func (h *ChannelContributionHandler) Review(c *gin.Context) {
 		response.BadRequest(c, "无效的申请 ID")
 		return
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 65536)
 	var body struct {
-		Decision string `json:"decision"`
-		Note     string `json:"note"`
+		Decision string    `json:"decision"`
+		Note     string    `json:"note"`
+		Models   *[]string `json:"models"`
 	}
 	if c.ShouldBindJSON(&body) != nil || (body.Decision != "approved" && body.Decision != "rejected") {
 		response.BadRequest(c, "审核内容无效")
 		return
 	}
-	if err := h.service.Review(c.Request.Context(), actor, id, body.Decision == "approved", body.Note); err != nil {
+	if err := h.service.ReviewWithModels(c.Request.Context(), actor, id, body.Decision == "approved", body.Note, body.Models); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 	response.Success(c, gin.H{"ok": true})
+}
+
+func (h *ChannelContributionHandler) Models(c *gin.Context) {
+	actor, ok := contributionActor(c)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "无效的申请 ID")
+		return
+	}
+	models, err := h.service.Models(c.Request.Context(), actor, id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"models": models})
+}
+
+func (h *ChannelContributionHandler) Quotas(c *gin.Context) {
+	actor, ok := contributionActor(c)
+	if !ok {
+		return
+	}
+	before, err := strconv.ParseInt(c.DefaultQuery("before", "0"), 10, 64)
+	if err != nil || before < 0 {
+		response.BadRequest(c, "无效的分页游标")
+		return
+	}
+	items, shared, err := h.service.Quotas(c.Request.Context(), actor, before)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	more := len(items) > 50
+	if more {
+		items = items[:50]
+	}
+	response.Success(c, gin.H{"items": items, "shared_quota": shared, "has_more": more})
 }

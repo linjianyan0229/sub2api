@@ -46,7 +46,7 @@
         <button v-if="hasMore" :disabled="loading" @click="older">{{ t('contributions.older') }}</button>
       </div>
 
-      <BaseDialog :show="submittingOpen" :title="t('contributions.provide')" width="normal" :close-on-click-outside="!saving" :close-on-escape="!saving" @close="closeSubmission">
+      <BaseDialog :show="submittingOpen" :title="t('contributions.provide')" width="wide" :close-on-click-outside="!saving" :close-on-escape="!saving" @close="closeSubmission">
         <form id="contribution-form" class="space-y-5" @submit.prevent="submit">
           <div><label for="contribution-site" class="input-label">{{ t('contributions.site') }}</label><input id="contribution-site" v-model="form.site_name" class="input" required maxlength="100" autocomplete="off"></div>
           <div><label for="contribution-url" class="input-label">{{ t('contributions.url') }}</label><input id="contribution-url" v-model="form.base_url" class="input" type="url" required maxlength="2048" placeholder="https://api.example.com" autocomplete="off"></div>
@@ -56,29 +56,42 @@
             <div><label for="contribution-group" class="input-label">{{ t('contributions.group') }}</label><select id="contribution-group" v-model="groupChoice" class="input" required :disabled="groupsLoading"><option value="" disabled>{{ t('contributions.selectGroup') }}</option><option value="new">＋ {{ t('contributions.newGroup') }}</option><option v-for="group in filteredGroups" :key="group.id" :value="String(group.id)">{{ group.name }}</option></select></div>
           </div>
           <div v-if="groupChoice === 'new'"><label for="contribution-new-group" class="input-label">{{ t('contributions.newGroupName') }}</label><input id="contribution-new-group" v-model="form.new_group_name" class="input" required maxlength="100"></div>
+          <ContributionLimits :model-value="form" @update:model-value="Object.assign(form, $event)" />
+          <div><label class="input-label">{{ t('contributions.models') }}</label><ModelWhitelistSelector :model-value="form.models || []" :platform="form.platform" @update:model-value="form.models = $event" /></div>
+          <ContributionGroupForm v-if="groupChoice === 'new'" :key="form.platform" ref="groupForm" v-model="groupConfig" :platform="form.platform" :groups="groups" />
         </form>
         <template #footer><button class="btn btn-secondary" :disabled="saving" @click="closeSubmission">{{ t('common.cancel') }}</button><button form="contribution-form" class="btn btn-primary" :disabled="saving || groupsLoading">{{ saving ? t('common.loading') : t('contributions.submit') }}</button></template>
       </BaseDialog>
 
-      <BaseDialog :show="!!reviewing" :title="t('contributions.reviewTitle')" :close-on-click-outside="!saving" :close-on-escape="!saving" @close="closeReview">
+      <BaseDialog :show="!!reviewing" :title="t('contributions.reviewTitle')" width="wide" :close-on-click-outside="!saving" :close-on-escape="!saving" @close="closeReview">
         <div v-if="reviewing" class="space-y-5">
           <div><h3 class="font-semibold">{{ reviewing.site_name }}</h3><p class="mt-1 break-all text-sm text-gray-500">{{ reviewing.base_url }}</p></div>
           <dl class="grid grid-cols-2 gap-4 text-sm"><div><dt class="text-gray-500">{{ t('contributions.platform') }}</dt><dd class="mt-1">{{ platformName(reviewing.platform) }}</dd></div><div><dt class="text-gray-500">{{ t('contributions.group') }}</dt><dd class="mt-1">{{ reviewing.new_group_name || reviewing.requested_group_name }}</dd></div><div class="col-span-2"><dt class="text-gray-500">{{ t('contributions.contributor') }}</dt><dd class="mt-1">{{ reviewing.contributor_name || t('leaderboard.anonymous') }}</dd></div></dl>
           <div><label for="contribution-note" class="input-label">{{ t('contributions.note') }}</label><textarea id="contribution-note" v-model="reviewNote" class="input" rows="3" maxlength="500" /></div>
+          <ContributionLimits :model-value="reviewing" readonly prefix="review-contribution" />
+          <div class="space-y-3">
+            <div class="flex items-center justify-between gap-3"><label class="input-label !mb-0">{{ t('contributions.models') }}</label><button type="button" class="btn btn-secondary" :disabled="modelsLoading || saving" @click="fetchModels">{{ modelsLoading ? t('common.loading') : t('contributions.fetchModels') }}</button></div>
+            <ModelWhitelistSelector v-model="reviewModels" :platform="reviewing.platform" />
+          </div>
+          <ContributionGroupForm v-if="reviewing.new_group_config" :key="reviewing.id" :model-value="reviewing.new_group_config" :platform="reviewing.platform" :groups="groups" readonly prefix="review-group" />
         </div>
-        <template #footer><button class="btn btn-secondary text-red-600" :disabled="saving" @click="review('rejected')">{{ t('contributions.reject') }}</button><button class="btn btn-primary" :disabled="saving" @click="review('approved')">{{ t('contributions.approve') }}</button></template>
+        <template #footer><button class="btn btn-secondary text-red-600" :disabled="saving || modelsLoading" @click="review('rejected')">{{ t('contributions.reject') }}</button><button class="btn btn-primary" :disabled="saving || modelsLoading" @click="review('approved')">{{ t('contributions.approve') }}</button></template>
       </BaseDialog>
     </div>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore, useAppStore } from '@/stores'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
+import ContributionLimits from '@/components/contributions/ContributionLimits.vue'
+import ContributionGroupForm from '@/components/contributions/ContributionGroupForm.vue'
+import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
+import type { CreateGroupRequest } from '@/types'
 import { channelContributionsAPI as api, type ChannelContribution, type ContributionGroup, type ContributionInput, type ContributionPlatform, type ContributionStatus } from '@/api/channelContributions'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
@@ -91,7 +104,11 @@ const items = ref<ChannelContribution[]>([]), groups = ref<ContributionGroup[]>(
 const loading = ref(false), failed = ref(false), saving = ref(false), groupsLoading = ref(false)
 const submittingOpen = ref(false), reviewing = ref<ChannelContribution | null>(null), reviewNote = ref('')
 const before = ref(0), hasMore = ref(false), groupChoice = ref('')
-const form = reactive<ContributionInput>({ site_name: '', base_url: '', api_key: '', platform: 'openai', group_id: null, new_group_name: '' })
+const form = reactive<ContributionInput>({ site_name: '', base_url: '', api_key: '', platform: 'openai', group_id: null, new_group_name: '', rpm: 0, concurrency: 5, daily_limit: 0, total_limit: 0, models: [] })
+const defaultGroup = (): CreateGroupRequest => ({ name: '', rate_multiplier: 1, long_context_pricing_enabled: true, rpm_limit: 0, subscription_type: 'standard', mcp_xml_inject: true, batch_image_discount_multiplier: 0.5, batch_image_hold_multiplier: 0.6 })
+const groupConfig = ref(defaultGroup()), groupForm = ref<InstanceType<typeof ContributionGroupForm>>()
+const reviewModels = ref<string[]>([]), modelsLoading = ref(false)
+watch(() => form.platform, () => { groupConfig.value = defaultGroup(); form.models = [] })
 const filteredGroups = computed(() => groups.value.filter(group => group.platform === form.platform))
 const platformName = (value: ContributionPlatform) => ({ openai: 'OpenAI', anthropic: 'Claude', gemini: 'Gemini' })[value]
 const date = (value: string) => new Date(value).toLocaleString(locale.value)
@@ -120,20 +137,29 @@ function closeSubmission() { if (!saving.value) { submittingOpen.value = false; 
 async function submit() {
   if (saving.value) return
   if (!groupChoice.value || (groupChoice.value === 'new' && !form.new_group_name.trim())) { app.showError(t('contributions.groupRequired')); return }
+  if (groupChoice.value === 'new' && groupForm.value && !groupForm.value.validate()) return
   saving.value = true
   try {
-    await api.submit({ ...form, group_id: groupChoice.value === 'new' ? null : Number(groupChoice.value), new_group_name: groupChoice.value === 'new' ? form.new_group_name : '' })
+    await api.submit({ ...form, group_id: groupChoice.value === 'new' ? null : Number(groupChoice.value), new_group_name: groupChoice.value === 'new' ? form.new_group_name : '', new_group_config: groupChoice.value === 'new' ? { ...groupConfig.value, name: form.new_group_name, platform: form.platform } : undefined })
     form.api_key = ''; submittingOpen.value = false
     app.showSuccess(t('contributions.submitted')); changeMode(false)
   } catch (err) { error(err) }
   finally { saving.value = false }
 }
-function openReview(item: ChannelContribution) { reviewing.value = item; reviewNote.value = '' }
+async function openReview(item: ChannelContribution) { reviewing.value = item; reviewNote.value = ''; reviewModels.value = [...(item.models || [])]; try { groups.value = await api.groups() } catch (err) { error(err) } }
+async function fetchModels() {
+  const item = reviewing.value
+  if (!item || modelsLoading.value) return
+  modelsLoading.value = true
+  try { const models = await api.models(item.id); if (reviewing.value?.id === item.id) reviewModels.value = models }
+  catch (err) { error(err) }
+  finally { modelsLoading.value = false }
+}
 function closeReview() { if (!saving.value) reviewing.value = null }
 async function review(decision: 'approved' | 'rejected') {
   if (!reviewing.value || saving.value) return
   saving.value = true
-  try { await api.review(reviewing.value.id, decision, reviewNote.value); reviewing.value = null; app.showSuccess(t('contributions.reviewed')); await load() }
+  try { await api.review(reviewing.value.id, decision, reviewNote.value, decision === 'approved' ? reviewModels.value : undefined); reviewing.value = null; app.showSuccess(t('contributions.reviewed')); await load() }
   catch (err) { error(err) }
   finally { saving.value = false }
 }

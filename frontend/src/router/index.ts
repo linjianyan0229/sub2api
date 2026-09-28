@@ -193,6 +193,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, title: 'Channel contributions', titleKey: 'contributions.title' }
   },
   {
+    path: '/channel-quotas',
+    name: 'ChannelQuotas',
+    component: () => import('@/views/user/ChannelQuotasView.vue'),
+    meta: { requiresAuth: true, title: 'Channel quotas', titleKey: 'contributions.quotas' }
+  },
+  {
     path: '/forum',
     name: 'Forum',
     component: () => import('@/views/user/ForumView.vue'),
