@@ -176,6 +176,7 @@ func ProvideAdminSettingHandler(settingService *service.SettingService, emailSer
 
 // ProvideHandlers creates the Handlers struct
 func ProvideHandlers(
+	contributions *ChannelContributionHandler,
 	forumHandler *ForumHandler,
 	authHandler *AuthHandler,
 	userHandler *UserHandler,
@@ -202,7 +203,10 @@ func ProvideHandlers(
 	_ *service.IdempotencyCleanupService,
 	_ *service.OpenAIQuotaAutoResetService,
 ) *Handlers {
+	apiKeyHandler.contributions = contributions.service
+	adminHandlers.Group.SetContributions(contributions.service)
 	return &Handlers{
+		Contributions:    contributions,
 		Forum:            forumHandler,
 		Auth:             authHandler,
 		User:             userHandler,
@@ -230,6 +234,7 @@ func ProvideHandlers(
 
 // ProviderSet is the Wire provider set for all handlers
 var ProviderSet = wire.NewSet(
+	NewChannelContributionHandler,
 	NewForumHandler,
 	// Top-level handlers
 	NewAuthHandler,

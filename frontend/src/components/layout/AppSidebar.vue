@@ -734,6 +734,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/usage', label: t('nav.usage'), icon: ChartIcon, hideInSimpleMode: true },
     ...(withDashboard ? [{ path: '/leaderboard', label: t('nav.leaderboard'), icon: ChartIcon }] : []),
     ...(withDashboard ? [{ path: '/forum', label: t('nav.forum'), icon: ForumIcon }] : []),
+    ...(withDashboard ? [{ path: '/channel-contributions', label: t('contributions.title'), icon: GlobeIcon }] : []),
     { path: '/available-channels', label: t('nav.availableChannels'), icon: ChannelIcon, hideInSimpleMode: true, featureFlag: flagAvailableChannels },
     { path: '/monitor', label: t('nav.channelStatus'), icon: SignalIcon, featureFlag: flagChannelMonitor },
     { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagSubscription },
@@ -846,6 +847,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon },
     { path: '/leaderboard', label: t('nav.leaderboard'), icon: ChartIcon },
     { path: '/forum', label: t('nav.forum'), icon: ForumIcon },
+    { path: '/channel-contributions', label: t('contributions.title'), icon: GlobeIcon },
     { path: '/admin/audit-logs', label: t('nav.auditLogs'), icon: ShieldIcon, hideInSimpleMode: true }
   ]
 

@@ -574,6 +574,7 @@
                 :peak-end="(option as unknown as GroupOption).peakEnd"
                 :peak-rate-multiplier="(option as unknown as GroupOption).peakRateMultiplier"
                 :description="(option as unknown as GroupOption).description"
+                :contributions="(option as unknown as GroupOption).contributions"
                 :selected="selected"
               />
             </template>
@@ -1181,6 +1182,7 @@
               :peak-end="option.peakEnd"
               :peak-rate-multiplier="option.peakRateMultiplier"
               :description="option.description"
+              :contributions="option.contributions"
               :selected="
                 selectedKeyForGroup?.group_id === option.value ||
                 (!selectedKeyForGroup?.group_id && option.value === null)
@@ -1245,6 +1247,7 @@ const formatDateTimeLocal = (isoDate: string): string => {
 }
 
 interface GroupOption {
+  contributions?: Group['contributions']
   value: number
   label: string
   description: string | null
@@ -1516,6 +1519,7 @@ const groupOptions = computed(() =>
     value: group.id,
     label: group.name,
     description: group.description,
+    contributions: group.contributions,
     rate: group.rate_multiplier,
     userRate: userGroupRates.value[group.id] ?? null,
     peakRateEnabled: group.peak_rate_enabled,

@@ -581,7 +581,14 @@ export interface ReasoningEffortMapping {
   model?: string
 }
 
+export interface GroupContribution {
+  account_id: number
+  account_name: string
+  contributor_name: string
+}
+
 export interface Group {
+  contributions?: GroupContribution[]
   shared_quota?: SharedGroupQuota
   id: number
   name: string

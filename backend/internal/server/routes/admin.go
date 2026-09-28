@@ -30,6 +30,10 @@ func RegisterAdminRoutes(
 	// 审计中间件挂在认证之后：所有管理面变更类操作 + 敏感读取入审计日志
 	admin.Use(gin.HandlerFunc(auditLog))
 	{
+		contributions := admin.Group("/channel-contributions")
+		contributions.GET("", h.Contributions.AdminList)
+		contributions.POST("/:id/review", h.Contributions.Review)
+
 		forum := admin.Group("/forum")
 		forum.PATCH("/settings", h.Forum.Settings)
 		forum.GET("/mutes", h.Forum.Mutes)

@@ -16,6 +16,8 @@ type GroupCodexModelsManifestConfig = domain.GroupCodexModelsManifestConfig
 type ReasoningEffortMapping = domain.ReasoningEffortMapping
 
 type Group struct {
+	Contributions []GroupContribution
+
 	SharedQuota    *SharedGroupQuota // 仅用于当前用户可用分组的展示，不持久化到分组配置。
 	ID             int64
 	Name           string

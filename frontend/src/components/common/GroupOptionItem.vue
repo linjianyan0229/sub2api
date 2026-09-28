@@ -20,6 +20,7 @@
       >
         {{ description }}
       </span>
+      <GroupContributions :items="contributions" />
     </div>
 
     <!-- Right: rate pill + checkmark (vertically centered to first row) -->
@@ -62,6 +63,8 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import GroupBadge from './GroupBadge.vue'
+import GroupContributions from './GroupContributions.vue'
+import type { GroupContribution } from '@/types'
 import type { SubscriptionType, GroupPlatform } from '@/types'
 import { useAppStore } from '@/stores/app'
 import { formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
@@ -69,6 +72,7 @@ import { formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
 const { t } = useI18n()
 
 interface Props {
+  contributions?: GroupContribution[]
   name: string
   platform: GroupPlatform
   subscriptionType?: SubscriptionType

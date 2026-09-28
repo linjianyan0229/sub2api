@@ -862,6 +862,7 @@ func ProvideUserService(userRepo UserRepository, settingRepo SettingRepository, 
 
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
+	NewChannelContributionService,
 	ProvideForumService,
 	// Core services
 	ProvideAuthService,

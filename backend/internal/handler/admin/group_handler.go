@@ -22,11 +22,14 @@ import (
 
 // GroupHandler handles admin group management
 type GroupHandler struct {
+	contributions        *service.ChannelContributionService
 	adminService         service.AdminService
 	dashboardService     *service.DashboardService
 	groupCapacityService *service.GroupCapacityService
 	cfg                  *config.Config
 }
+
+func (h *GroupHandler) SetContributions(s *service.ChannelContributionService) { h.contributions = s }
 
 // GetLiveCapability 返回当前服务端是否具备生成 Live attestation 的运行环境。
 func (h *GroupHandler) GetLiveCapability(c *gin.Context) {
@@ -136,11 +139,12 @@ func (h *GroupHandler) rejectUnsupportedSimpleModeOperation(c *gin.Context, oper
 }
 
 type simpleModeGroupResponse struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Platform    string `json:"platform"`
-	Status      string `json:"status"`
+	Contributions []service.GroupContribution `json:"contributions,omitempty"`
+	ID            int64                       `json:"id"`
+	Name          string                      `json:"name"`
+	Description   string                      `json:"description"`
+	Platform      string                      `json:"platform"`
+	Status        string                      `json:"status"`
 
 	AccountCount            int64     `json:"account_count,omitempty"`
 	ActiveAccountCount      int64     `json:"active_account_count,omitempty"`
@@ -155,7 +159,8 @@ func groupForSimpleMode(group *service.Group) *simpleModeGroupResponse {
 		return nil
 	}
 	return &simpleModeGroupResponse{
-		ID: group.ID, Name: group.Name, Description: group.Description, Platform: group.Platform,
+		Contributions: group.Contributions,
+		ID:            group.ID, Name: group.Name, Description: group.Description, Platform: group.Platform,
 		Status:             group.Status,
 		AccountCount:       group.AccountCount,
 		ActiveAccountCount: group.ActiveAccountCount, RateLimitedAccountCount: group.RateLimitedAccountCount,
@@ -372,6 +377,10 @@ func (h *GroupHandler) List(c *gin.Context) {
 
 	groups, total, err := h.adminService.ListGroups(c.Request.Context(), page, pageSize, platform, status, search, isExclusive, sortBy, sortOrder)
 	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if err := h.contributions.EnrichGroups(c.Request.Context(), groups); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}

@@ -21,6 +21,7 @@ import (
 // APIKeyHandler handles API key-related requests
 type APIKeyHandler struct {
 	apiKeyService *service.APIKeyService
+	contributions *service.ChannelContributionService
 }
 
 // NewAPIKeyHandler creates a new APIKeyHandler
@@ -328,6 +329,10 @@ func (h *APIKeyHandler) GetAvailableGroups(c *gin.Context) {
 
 	groups, err := h.apiKeyService.GetAvailableGroups(c.Request.Context(), subject.UserID)
 	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if err := h.contributions.EnrichGroups(c.Request.Context(), groups); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}

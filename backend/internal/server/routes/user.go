@@ -25,6 +25,11 @@ func RegisterUserRoutes(
 	// 用户管理面变更类操作入审计（含 TOTP 启用/禁用、step-up 验证、密码修改等安全事件）
 	authenticated.Use(gin.HandlerFunc(auditLog))
 	{
+		contributions := authenticated.Group("/channel-contributions")
+		contributions.GET("", h.Contributions.Mine)
+		contributions.POST("", h.Contributions.Submit)
+		contributions.GET("/groups", h.Contributions.Groups)
+
 		forum := authenticated.Group("/forum")
 		forum.GET("", h.Forum.Page)
 		forum.POST("/messages", h.Forum.Create)

@@ -95,6 +95,8 @@ type APIKey struct {
 }
 
 type Group struct {
+	Contributions []service.GroupContribution `json:"contributions,omitempty"`
+
 	SharedQuota *service.SharedGroupQuota `json:"shared_quota,omitempty"`
 
 	ID             int64   `json:"id"`
