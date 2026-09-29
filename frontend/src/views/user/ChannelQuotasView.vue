@@ -39,7 +39,7 @@ async function load() {
   request?.abort()
   const current = new AbortController(); request = current
   loading.value = true; failed.value = false
-  try { const data = await api.quotas(before.value, current.signal); if (current.signal.aborted) return; items.value = data.items; shared.value = data.shared_quota; hasMore.value = data.has_more }
+  try { const data = await api.quotas(before.value, current.signal); if (current.signal.aborted) return; items.value = data.items.filter(item => item.status === 'active'); shared.value = data.shared_quota; hasMore.value = data.has_more }
   catch { if (!current.signal.aborted) failed.value = true }
   finally { if (!current.signal.aborted) loading.value = false }
 }

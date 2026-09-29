@@ -10,6 +10,8 @@
       @refresh="manualReload"
     />
 
+    <ContributionStatusPanel />
+
     <MonitorCardGrid
       :items="items"
       :window="currentWindow"
@@ -40,6 +42,7 @@ import {
   type UserMonitorDetail,
 } from '@/api/channelMonitor'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import ContributionStatusPanel from '@/components/contributions/ContributionStatusPanel.vue'
 import MonitorHero, {
   type MonitorWindow,
   type OverallStatus,

@@ -41,6 +41,7 @@ type ChannelContribution struct {
 	GroupID            *int64     `json:"group_id"`
 	AccountID          *int64     `json:"account_id"`
 	CreatedAt          time.Time  `json:"created_at"`
+	CanEdit            bool       `json:"can_edit"`
 }
 
 type GroupContribution struct {
@@ -66,6 +67,7 @@ type ContributionSettings struct {
 	DailyLimit     float64           `json:"daily_limit"`
 	TotalLimit     float64           `json:"total_limit"`
 	Models         []string          `json:"models"`
+	ShowInStatus   bool              `json:"show_in_status"`
 }
 
 func validateContributionSettings(s *ContributionSettings) error {
@@ -143,7 +145,15 @@ func validateContribution(in *ChannelContributionInput) error {
 	if (in.GroupID == nil) == (in.NewGroupName == "") || (in.GroupID != nil && *in.GroupID <= 0) {
 		return ErrContributionGroup
 	}
-	if in.APIKey == "" || len(in.APIKey) > 4096 || strings.IndexFunc(in.APIKey, unicode.IsSpace) >= 0 || strings.IndexFunc(in.APIKey, unicode.IsControl) >= 0 {
+	return validateContributionConnection(in, true)
+}
+
+func validateContributionConnection(in *ChannelContributionInput, requireKey bool) error {
+	in.SiteName, in.APIKey = strings.TrimSpace(in.SiteName), strings.TrimSpace(in.APIKey)
+	if in.SiteName == "" || !utf8.ValidString(in.SiteName) || utf8.RuneCountInString(in.SiteName) > 100 || strings.IndexFunc(in.SiteName, unicode.IsControl) >= 0 {
+		return infraerrors.BadRequest("CONTRIBUTION_INVALID", "请填写有效的站点名称")
+	}
+	if (requireKey && in.APIKey == "") || len(in.APIKey) > 4096 || strings.IndexFunc(in.APIKey, unicode.IsSpace) >= 0 || strings.IndexFunc(in.APIKey, unicode.IsControl) >= 0 {
 		return infraerrors.BadRequest("CONTRIBUTION_KEY_INVALID", "请填写有效的 API Key")
 	}
 	normalized, err := urlvalidator.ValidateHTTPSURL(in.BaseURL, urlvalidator.ValidationOptions{})

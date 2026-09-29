@@ -45,7 +45,9 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	if err != nil {
 		return nil, err
 	}
-	channelContributionRepository := repository.NewChannelContributionRepository(client, db)
+	redisClient := repository.ProvideRedis(configConfig)
+	schedulerCache := repository.ProvideSchedulerCache(redisClient, configConfig)
+	channelContributionRepository := repository.NewChannelContributionRepository(client, db, schedulerCache)
 	secretEncryptor, err := repository.NewAESEncryptor(configConfig)
 	if err != nil {
 		return nil, err
@@ -55,7 +57,6 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	groupRepository := repository.NewGroupRepository(client, db)
 	userSubscriptionRepository := repository.NewUserSubscriptionRepository(client)
 	userGroupRateRepository := repository.NewUserGroupRateRepository(db)
-	redisClient := repository.ProvideRedis(configConfig)
 	apiKeyCache := repository.NewAPIKeyCache(redisClient)
 	billingCache := repository.NewBillingCache(redisClient)
 	userRPMCache := repository.NewUserRPMCache(redisClient)
@@ -68,7 +69,6 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	}
 	billingCacheService := service.ProvideBillingCacheService(billingCache, userRepository, userSubscriptionRepository, apiKeyRepository, userRPMCache, userGroupRateRepository, configConfig, serviceUserPlatformQuotaRepository, sharedQuotaService)
 	concurrencyCache := repository.ProvideConcurrencyCache(redisClient, configConfig)
-	schedulerCache := repository.ProvideSchedulerCache(redisClient, configConfig)
 	accountRepository := repository.NewAccountRepository(client, db, schedulerCache)
 	contributionAdmissionRepository := repository.NewContributionAdmissionRepository(db)
 	concurrencyService := service.ProvideConcurrencyService(concurrencyCache, accountRepository, contributionAdmissionRepository, configConfig)

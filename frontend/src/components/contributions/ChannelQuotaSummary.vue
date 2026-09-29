@@ -21,10 +21,10 @@ let request: AbortController | undefined, timer: ReturnType<typeof setInterval> 
 async function load() {
   if (document.hidden || request) return
   const current = new AbortController(); request = current
-  try { const data = await channelContributionsAPI.quotas(0, current.signal); if (!current.signal.aborted) items.value = data.items }
+  try { const data = await channelContributionsAPI.quotas(0, current.signal); if (!current.signal.aborted) items.value = data.items.filter(item => item.status === 'active') }
   catch { if (!current.signal.aborted) items.value = [] }
   finally { if (request === current) request = undefined }
 }
-onMounted(() => { void load(); timer = setInterval(load, 30000); document.addEventListener('visibilitychange', load) })
-onBeforeUnmount(() => { request?.abort(); clearInterval(timer); document.removeEventListener('visibilitychange', load) })
+onMounted(() => { void load(); timer = setInterval(load, 30000); document.addEventListener('visibilitychange', load); window.addEventListener('contribution-updated', load) })
+onBeforeUnmount(() => { request?.abort(); clearInterval(timer); document.removeEventListener('visibilitychange', load); window.removeEventListener('contribution-updated', load) })
 </script>

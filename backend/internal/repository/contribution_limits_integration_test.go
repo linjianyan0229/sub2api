@@ -30,9 +30,7 @@ func TestContributionConfiguredGroupCreatedOnlyAfterApproval(t *testing.T) {
 	require.Zero(t, count)
 	rows, _, err := f.svc.Quotas(f.ctx, f.user, 0)
 	require.NoError(t, err)
-	require.Len(t, rows, 1)
-	require.Equal(t, in.NewGroupName, rows[0].Groups[0].Name)
-	require.Equal(t, "pending", rows[0].Status)
+	require.Empty(t, rows)
 	rows, _, err = f.svc.Quotas(f.ctx, f.other, 0)
 	require.NoError(t, err)
 	require.Empty(t, rows)
@@ -166,6 +164,9 @@ func TestContributionIndependentQuotaAdmissionBillingAndBatch(t *testing.T) {
 		}
 	}
 	require.Equal(t, 4, accepted)
+	quotaRows, _, err := f.svc.Quotas(f.ctx, f.user, 0)
+	require.NoError(t, err)
+	require.Empty(t, quotaRows)
 	_, err = integrationDB.Exec(`UPDATE accounts SET extra=extra || '{"base_rpm":0}' WHERE id=$1`, accountID)
 	require.NoError(t, err)
 	billing := &usageBillingRepository{db: integrationDB}
@@ -203,6 +204,11 @@ func TestContributionIndependentQuotaAdmissionBillingAndBatch(t *testing.T) {
 	hold := &service.BatchImageBalanceHoldCommand{RequestID: uuid.NewString(), APIKeyID: key.ID, UserID: f.user, BatchID: batchID, HoldAmount: 8}
 	_, err = billing.ReserveBatchImageBalance(service.WithSharedQuota(f.ctx, q), hold)
 	require.NoError(t, err)
+	quotaRows, _, err = f.svc.Quotas(f.ctx, f.user, 0)
+	require.NoError(t, err)
+	for _, row := range quotaRows {
+		require.NotEqual(t, c.ID, row.ID, "批量冻结耗尽额度的渠道不可展示为可用")
+	}
 	ok, err = admission.AdmitContributionAccount(f.ctx, accountID, q)
 	require.NoError(t, err)
 	require.False(t, ok)

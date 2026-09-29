@@ -10,6 +10,7 @@ export interface ContributionSettings {
   total_limit?: number
   models?: string[]
   new_group_config?: CreateGroupRequest
+  show_in_status?: boolean
 }
 export interface ChannelContribution extends ContributionSettings {
   id: number
@@ -26,7 +27,14 @@ export interface ChannelContribution extends ContributionSettings {
   group_id: number | null
   account_id: number | null
   created_at: string
+  can_edit?: boolean
 }
+export interface ContributionAccountInput extends Omit<ContributionSettings, 'new_group_config'> {
+  site_name: string
+  base_url: string
+  api_key?: string
+}
+export interface ContributionAccountView extends ContributionAccountInput { platform: ContributionPlatform }
 export interface ContributionInput extends ContributionSettings {
   site_name: string
   base_url: string
@@ -54,6 +62,9 @@ export const channelContributionsAPI = {
     return (await apiClient.get<{ items: ChannelContribution[]; has_more: boolean }>(`${admin ? '/admin' : ''}/channel-contributions`, { params: { status, before }, signal })).data
   },
   async groups() { return (await apiClient.get<ContributionGroup[]>('/channel-contributions/groups')).data },
+  async account(id: number, signal?: AbortSignal) { return (await apiClient.get<ContributionAccountView>(`/channel-contributions/${id}/account`, { signal })).data },
+  async updateAccount(id: number, input: ContributionAccountInput) { await apiClient.put(`/channel-contributions/${id}/account`, input) },
+  async statuses(before = 0, signal?: AbortSignal) { return (await apiClient.get<ContributionQuotaPage>('/channel-contributions/statuses', { params: { before }, signal })).data },
   async submit(input: ContributionInput) { return (await apiClient.post<ChannelContribution>('/channel-contributions', input)).data },
   async review(id: number, decision: 'approved' | 'rejected', note: string, models?: string[]) {
     await apiClient.post(`/admin/channel-contributions/${id}/review`, { decision, note, models })

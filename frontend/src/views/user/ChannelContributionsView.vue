@@ -37,6 +37,7 @@
           <div class="contribution-result">
             <span class="contribution-status" :class="`status-${item.status}`"><i />{{ t(`contributions.${item.status}`) }}</span>
             <button v-if="reviewMode && item.status === 'pending'" class="contribution-review-button" @click="openReview(item)">{{ t('contributions.reviewTitle') }}<Icon name="chevronRight" size="sm" /></button>
+            <button v-if="!reviewMode && item.status === 'approved' && item.can_edit" class="contribution-review-button" data-edit-account @click="editingId = item.id">{{ t('contributions.editAccount') }}<Icon name="chevronRight" size="sm" /></button>
           </div>
           <p v-if="item.review_note" class="contribution-note">{{ item.review_note }}</p>
         </article>
@@ -77,6 +78,7 @@
         </div>
         <template #footer><button class="btn btn-secondary text-red-600" :disabled="saving || modelsLoading" @click="review('rejected')">{{ t('contributions.reject') }}</button><button class="btn btn-primary" :disabled="saving || modelsLoading" @click="review('approved')">{{ t('contributions.approve') }}</button></template>
       </BaseDialog>
+      <ContributionAccountDialog :id="editingId" @close="editingId = null" @saved="load" />
     </div>
   </AppLayout>
 </template>
@@ -89,6 +91,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ContributionLimits from '@/components/contributions/ContributionLimits.vue'
+import ContributionAccountDialog from '@/components/contributions/ContributionAccountDialog.vue'
 import ContributionGroupForm from '@/components/contributions/ContributionGroupForm.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import type { CreateGroupRequest } from '@/types'
@@ -108,6 +111,7 @@ const form = reactive<ContributionInput>({ site_name: '', base_url: '', api_key:
 const defaultGroup = (): CreateGroupRequest => ({ name: '', rate_multiplier: 1, long_context_pricing_enabled: true, rpm_limit: 0, subscription_type: 'standard', mcp_xml_inject: true, batch_image_discount_multiplier: 0.5, batch_image_hold_multiplier: 0.6 })
 const groupConfig = ref(defaultGroup()), groupForm = ref<InstanceType<typeof ContributionGroupForm>>()
 const reviewModels = ref<string[]>([]), modelsLoading = ref(false)
+const editingId = ref<number | null>(null)
 watch(() => form.platform, () => { groupConfig.value = defaultGroup(); form.models = [] })
 const filteredGroups = computed(() => groups.value.filter(group => group.platform === form.platform))
 const platformName = (value: ContributionPlatform) => ({ openai: 'OpenAI', anthropic: 'Claude', gemini: 'Gemini' })[value]

@@ -30,6 +30,9 @@ func RegisterUserRoutes(
 		contributions.POST("", h.Contributions.Submit)
 		contributions.GET("/groups", h.Contributions.Groups)
 		contributions.GET("/quotas", h.Contributions.Quotas)
+		contributions.GET("/statuses", h.Contributions.Statuses)
+		contributions.GET("/:id/account", h.Contributions.OwnedAccount)
+		contributions.PUT("/:id/account", h.Contributions.UpdateOwnedAccount)
 
 		forum := authenticated.Group("/forum")
 		forum.GET("", h.Forum.Page)

@@ -5,7 +5,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import ChannelContributionsView from '../ChannelContributionsView.vue'
 import GroupContributions from '@/components/common/GroupContributions.vue'
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), groups: vi.fn(), submit: vi.fn(), review: vi.fn(), models: vi.fn(), success: vi.fn(), error: vi.fn(), auth: { isAdmin: false } }))
+const mocks = vi.hoisted(() => ({ list: vi.fn(), groups: vi.fn(), submit: vi.fn(), review: vi.fn(), models: vi.fn(), account: vi.fn(), updateAccount: vi.fn(), success: vi.fn(), error: vi.fn(), auth: { isAdmin: false } }))
 vi.mock('@/api/channelContributions', () => ({ channelContributionsAPI: mocks }))
 vi.mock('@/stores', () => ({ useAuthStore: () => mocks.auth, useAppStore: () => ({ showSuccess: mocks.success, showError: mocks.error }) }))
 vi.mock('vue-i18n', async (original) => ({ ...await original<typeof import('vue-i18n')>(), useI18n: () => ({ t: (key: string) => key, locale: ref('zh-CN') }) }))
@@ -37,6 +37,43 @@ async function openForm() {
 }
 
 describe('渠道提供', () => {
+  it('贡献者编辑已通过渠道，读取实时配置且 Key 留空保留，保存后刷新列表', async () => {
+    mocks.list.mockResolvedValue({ items: [{ ...item, status: 'approved', can_edit: true }], has_more: false })
+    mocks.account.mockResolvedValue({ site_name: '实时站名', base_url: 'https://api.example.com/v2', platform: 'gemini', rpm: 30, concurrency: 6, daily_limit: 20, total_limit: 100, models: ['gemini-2.5-pro'], show_in_status: false })
+    mocks.updateAccount.mockResolvedValue(undefined)
+    wrapper = mount(ChannelContributionsView, { attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-edit-account]').trigger('click'); await flushPromises()
+    expect(mocks.account).toHaveBeenCalledWith(7, expect.any(AbortSignal))
+    expect((wrapper.get('#account-contribution-site').element as HTMLInputElement).value).toBe('实时站名')
+    expect((wrapper.get('#account-contribution-key').element as HTMLInputElement).value).toBe('')
+    expect(wrapper.get('#account-contribution-key').attributes('required')).toBeUndefined()
+    expect(wrapper.text()).toContain('gemini-2.5-pro')
+    await wrapper.get('#account-contribution-site').setValue('更新后的站名')
+    await wrapper.get('#account-contribution-status').setValue(true)
+    await wrapper.get('button[form="contribution-account-form"]').trigger('click'); await flushPromises()
+    expect(mocks.updateAccount).toHaveBeenCalledWith(7, { site_name: '更新后的站名', base_url: 'https://api.example.com/v2', api_key: '', rpm: 30, concurrency: 6, daily_limit: 20, total_limit: 100, models: ['gemini-2.5-pro'], show_in_status: true })
+    expect(mocks.list).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('#account-contribution-key').exists()).toBe(false)
+  })
+
+  it('保存失败保留编辑内容，取消后清除 Key；已移除账号没有编辑入口', async () => {
+    mocks.list.mockResolvedValue({ items: [{ ...item, status: 'approved', can_edit: true }, { ...item, id: 8, status: 'approved', can_edit: false }], has_more: false })
+    mocks.account.mockResolvedValue({ ...item, rpm: 0, concurrency: 5, daily_limit: 0, total_limit: 0, models: [], show_in_status: false })
+    mocks.updateAccount.mockRejectedValueOnce(new Error('保存失败'))
+    wrapper = mount(ChannelContributionsView)
+    await flushPromises()
+    expect(wrapper.findAll('[data-edit-account]')).toHaveLength(1)
+    await wrapper.get('[data-edit-account]').trigger('click'); await flushPromises()
+    await wrapper.get('#account-contribution-key').setValue('sk-new-private')
+    await wrapper.get('#contribution-account-form').trigger('submit'); await flushPromises()
+    expect(mocks.error).toHaveBeenCalledWith('保存失败')
+    expect((wrapper.get('#account-contribution-key').element as HTMLInputElement).value).toBe('sk-new-private')
+    await wrapper.findAll('button').find(b => b.text() === 'common.cancel')!.trigger('click')
+    await wrapper.get('[data-edit-account]').trigger('click'); await flushPromises()
+    expect((wrapper.get('#account-contribution-key').element as HTMLInputElement).value).toBe('')
+  })
+
   it('普通用户仅有自己的申请，点击提交按钮可申请新组且成功后清空 Key', async () => {
     await openForm()
     expect(mocks.list).toHaveBeenCalledWith(false, '', 0, expect.any(AbortSignal))

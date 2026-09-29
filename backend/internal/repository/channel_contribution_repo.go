@@ -12,12 +12,13 @@ import (
 )
 
 type channelContributionRepository struct {
-	client *dbent.Client
-	db     *sql.DB
+	client         *dbent.Client
+	db             *sql.DB
+	schedulerCache service.SchedulerCache
 }
 
-func NewChannelContributionRepository(client *dbent.Client, db *sql.DB) service.ChannelContributionRepository {
-	return &channelContributionRepository{client: client, db: db}
+func NewChannelContributionRepository(client *dbent.Client, db *sql.DB, schedulerCache service.SchedulerCache) service.ChannelContributionRepository {
+	return &channelContributionRepository{client: client, db: db, schedulerCache: schedulerCache}
 }
 
 func contributionRow(ctx context.Context, exec sqlExecutor, query string, args []any, dest ...any) error {
@@ -45,14 +46,15 @@ func requireContributionAdmin(ctx context.Context, exec sqlExecutor, actor int64
 }
 
 const contributionSelect = `SELECT c.id,c.user_id,COALESCE(u.username,''),c.site_name,c.base_url,c.platform,
-c.requested_group_id,c.new_group_name,COALESCE(g.name,''),c.status,c.review_note,c.reviewed_at,c.group_id,c.account_id,c.created_at,c.settings`
+c.requested_group_id,c.new_group_name,COALESCE(g.name,''),c.status,c.review_note,c.reviewed_at,c.group_id,c.account_id,c.created_at,c.settings,
+(c.status='approved' AND EXISTS(SELECT 1 FROM accounts a WHERE a.id=c.account_id AND a.deleted_at IS NULL AND a.type='apikey' AND a.platform=c.platform))`
 const contributionJoins = ` FROM channel_contributions c LEFT JOIN users u ON u.id=c.user_id AND u.deleted_at IS NULL
 LEFT JOIN groups g ON g.id=c.requested_group_id AND g.deleted_at IS NULL `
 
 func scanContribution(rows *sql.Rows, secret bool) (*service.ChannelContribution, error) {
 	c := &service.ChannelContribution{}
 	var settings []byte
-	dest := []any{&c.ID, &c.UserID, &c.ContributorName, &c.SiteName, &c.BaseURL, &c.Platform, &c.RequestedGroupID, &c.NewGroupName, &c.RequestedGroupName, &c.Status, &c.ReviewNote, &c.ReviewedAt, &c.GroupID, &c.AccountID, &c.CreatedAt, &settings}
+	dest := []any{&c.ID, &c.UserID, &c.ContributorName, &c.SiteName, &c.BaseURL, &c.Platform, &c.RequestedGroupID, &c.NewGroupName, &c.RequestedGroupName, &c.Status, &c.ReviewNote, &c.ReviewedAt, &c.GroupID, &c.AccountID, &c.CreatedAt, &settings, &c.CanEdit}
 	if secret {
 		dest = append(dest, &c.KeyEncrypted)
 	}

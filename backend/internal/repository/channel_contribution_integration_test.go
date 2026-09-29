@@ -27,7 +27,7 @@ type contributionFixture struct {
 func newContributionFixture(t *testing.T) contributionFixture {
 	t.Helper()
 	f := contributionFixture{ctx: context.Background(), prefix: uuid.NewString()}
-	f.repo = NewChannelContributionRepository(integrationEntClient, integrationDB)
+	f.repo = NewChannelContributionRepository(integrationEntClient, integrationDB, nil)
 	users := NewUserRepository(integrationEntClient, integrationDB)
 	keys := service.NewAPIKeyService(nil, users, NewGroupRepository(integrationEntClient, integrationDB), NewUserSubscriptionRepository(integrationEntClient), nil, nil, &config.Config{})
 	admin := service.NewAdminService(&config.Config{}, users, NewAdminGroupRepository(integrationEntClient, integrationDB), NewAccountRepository(integrationEntClient, integrationDB, nil).(service.AdminAccountRepository),

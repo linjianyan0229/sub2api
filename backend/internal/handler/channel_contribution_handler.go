@@ -138,6 +138,14 @@ func (h *ChannelContributionHandler) Models(c *gin.Context) {
 }
 
 func (h *ChannelContributionHandler) Quotas(c *gin.Context) {
+	h.catalog(c, false)
+}
+
+func (h *ChannelContributionHandler) Statuses(c *gin.Context) {
+	h.catalog(c, true)
+}
+
+func (h *ChannelContributionHandler) catalog(c *gin.Context, statusPage bool) {
 	actor, ok := contributionActor(c)
 	if !ok {
 		return
@@ -147,7 +155,13 @@ func (h *ChannelContributionHandler) Quotas(c *gin.Context) {
 		response.BadRequest(c, "无效的分页游标")
 		return
 	}
-	items, shared, err := h.service.Quotas(c.Request.Context(), actor, before)
+	var items []service.ContributionQuotaView
+	var shared *service.SharedQuotaSnapshot
+	if statusPage {
+		items, err = h.service.Statuses(c.Request.Context(), actor, before)
+	} else {
+		items, shared, err = h.service.Quotas(c.Request.Context(), actor, before)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -157,4 +171,44 @@ func (h *ChannelContributionHandler) Quotas(c *gin.Context) {
 		items = items[:50]
 	}
 	response.Success(c, gin.H{"items": items, "shared_quota": shared, "has_more": more})
+}
+
+func (h *ChannelContributionHandler) OwnedAccount(c *gin.Context) {
+	h.ownedAccount(c, false)
+}
+
+func (h *ChannelContributionHandler) UpdateOwnedAccount(c *gin.Context) {
+	h.ownedAccount(c, true)
+}
+
+func (h *ChannelContributionHandler) ownedAccount(c *gin.Context, update bool) {
+	actor, ok := contributionActor(c)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "无效的申请 ID")
+		return
+	}
+	if update {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 65536)
+		var body service.ContributionAccountInput
+		if c.ShouldBindJSON(&body) != nil {
+			response.BadRequest(c, "渠道配置无效")
+			return
+		}
+		if err := h.service.UpdateOwnedAccount(c.Request.Context(), actor, id, body); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		response.Success(c, gin.H{"ok": true})
+		return
+	}
+	item, err := h.service.OwnedAccount(c.Request.Context(), actor, id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, item)
 }
