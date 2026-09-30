@@ -18,8 +18,8 @@ func (r *channelContributionRepository) GetOwnedAccount(ctx context.Context, act
 	v := &service.ContributionAccountView{}
 	var extra, models []byte
 	err := contributionRow(ctx, r.db, `SELECT a.name,COALESCE(a.credentials->>'base_url',''),a.platform,a.concurrency,a.extra,
-COALESCE(a.credentials->'model_mapping','{}'),COALESCE((c.settings->>'show_in_status')::boolean,false)`+ownedContributionAccount,
-		[]any{id, actor}, &v.SiteName, &v.BaseURL, &v.Platform, &v.Concurrency, &extra, &models, &v.ShowInStatus)
+COALESCE(a.credentials->'model_mapping','{}'),COALESCE((c.settings->>'show_in_status')::boolean,false),COALESCE(c.settings->>'monitor_model',''),COALESCE(c.settings->>'monitor_api_mode','chat_completions')`+ownedContributionAccount,
+		[]any{id, actor}, &v.SiteName, &v.BaseURL, &v.Platform, &v.Concurrency, &extra, &models, &v.ShowInStatus, &v.MonitorModel, &v.MonitorAPIMode)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrContributionNotFound, nil)
 	}
@@ -89,7 +89,7 @@ func (r *channelContributionRepository) UpdateOwnedAccount(ctx context.Context, 
 	if in.APIKey != "" {
 		credentials["api_key"] = in.APIKey
 	}
-	settings := service.ContributionSettings{RPM: in.RPM, Concurrency: in.Concurrency, DailyLimit: in.DailyLimit, TotalLimit: in.TotalLimit, Models: in.Models, ShowInStatus: in.ShowInStatus}
+	settings := service.ContributionSettings{RPM: in.RPM, Concurrency: in.Concurrency, DailyLimit: in.DailyLimit, TotalLimit: in.TotalLimit, Models: in.Models, ShowInStatus: in.ShowInStatus, MonitorModel: in.MonitorModel, MonitorAPIMode: in.MonitorAPIMode}
 	settingsJSON, err := json.Marshal(settings)
 	if err != nil {
 		return err
@@ -100,6 +100,9 @@ func (r *channelContributionRepository) UpdateOwnedAccount(ctx context.Context, 
 		return err
 	}
 	if _, err := client.ExecContext(txCtx, `UPDATE channel_contributions SET site_name=$2,base_url=$3,settings=settings || $4::jsonb,updated_at=NOW() WHERE id=$1`, id, in.SiteName, in.BaseURL, string(settingsJSON)); err != nil {
+		return err
+	}
+	if err := syncContributionMonitor(txCtx, client, id); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

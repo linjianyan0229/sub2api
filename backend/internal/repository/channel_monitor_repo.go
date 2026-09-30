@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -159,7 +160,10 @@ func (r *channelMonitorRepository) Delete(ctx context.Context, id int64) error {
 }
 
 func (r *channelMonitorRepository) List(ctx context.Context, params service.ChannelMonitorListParams) ([]*service.ChannelMonitor, int64, error) {
-	q := r.client.ChannelMonitor.Query()
+	// 贡献监控由渠道账号编辑入口管理，不混入普通监控的 CRUD 列表。
+	q := r.client.ChannelMonitor.Query().Where(func(s *entsql.Selector) {
+		s.Where(entsql.Not(sqljson.HasKey(channelmonitor.FieldExtraHeaders, sqljson.Path(service.ChannelMonitorContributionMetadataKey))))
+	})
 	if params.Provider != "" {
 		q = q.Where(channelmonitor.ProviderEQ(channelmonitor.Provider(params.Provider)))
 	}
@@ -769,6 +773,8 @@ func entToServiceMonitor(row *dbent.ChannelMonitor) *service.ChannelMonitor {
 	}
 	duplicateOperationID := headers[service.ChannelMonitorDuplicateOperationIDMetadataKey]
 	delete(headers, service.ChannelMonitorDuplicateOperationIDMetadataKey)
+	contributionID, _ := strconv.ParseInt(headers[service.ChannelMonitorContributionMetadataKey], 10, 64)
+	delete(headers, service.ChannelMonitorContributionMetadataKey)
 	out := &service.ChannelMonitor{
 		ID:                   row.ID,
 		Name:                 row.Name,
@@ -791,6 +797,7 @@ func entToServiceMonitor(row *dbent.ChannelMonitor) *service.ChannelMonitor {
 		BodyOverride:         row.BodyOverride,
 		CheckMode:            defaultCheckModeRepo(row.CheckMode),
 		DuplicateOperationID: duplicateOperationID,
+		ContributionID:       contributionID,
 	}
 	if row.TemplateID != nil {
 		id := *row.TemplateID
@@ -809,13 +816,16 @@ func channelMonitorHeadersForPersistence(m *service.ChannelMonitor) map[string]s
 	}
 	headers := make(map[string]string, len(m.ExtraHeaders)+1)
 	for key, value := range m.ExtraHeaders {
-		if key == service.ChannelMonitorDuplicateOperationIDMetadataKey {
+		if key == service.ChannelMonitorDuplicateOperationIDMetadataKey || key == service.ChannelMonitorContributionMetadataKey {
 			continue
 		}
 		headers[key] = value
 	}
 	if operationID := strings.TrimSpace(m.DuplicateOperationID); operationID != "" {
 		headers[service.ChannelMonitorDuplicateOperationIDMetadataKey] = operationID
+	}
+	if m.ContributionID > 0 {
+		headers[service.ChannelMonitorContributionMetadataKey] = strconv.FormatInt(m.ContributionID, 10)
 	}
 	return headers
 }

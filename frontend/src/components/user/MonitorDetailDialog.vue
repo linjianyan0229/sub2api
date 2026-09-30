@@ -75,6 +75,7 @@ const props = defineProps<{
   show: boolean
   monitorId: number | null
   title: string
+  loadDetail?: (id: number) => Promise<UserMonitorDetail>
 }>()
 
 defineEmits<{
@@ -94,7 +95,7 @@ async function load(id: number) {
   detail.value = null
   loading.value = true
   try {
-    const result = await fetchChannelMonitorDetail(id)
+    const result = await (props.loadDetail ?? fetchChannelMonitorDetail)(id)
     if (version === requestVersion) detail.value = result
   } catch (err: unknown) {
     if (version !== requestVersion) return

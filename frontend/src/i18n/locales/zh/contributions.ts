@@ -13,6 +13,8 @@ export default {
     keepKey: '留空保留原 Key',
     accountSaved: '渠道配置已保存',
     showInStatus: '显示在渠道状态',
+    monitorModel: '检测模型',
+    monitorProtocol: '检测协议',
     communityChannels: '贡献渠道',
     statusLoadFailed: '无法加载贡献渠道状态',
     accessPolicy: '访问策略',

@@ -68,6 +68,8 @@ type ContributionSettings struct {
 	TotalLimit     float64           `json:"total_limit"`
 	Models         []string          `json:"models"`
 	ShowInStatus   bool              `json:"show_in_status"`
+	MonitorModel   string            `json:"monitor_model,omitempty"`
+	MonitorAPIMode string            `json:"monitor_api_mode,omitempty"`
 }
 
 func validateContributionSettings(s *ContributionSettings) error {
@@ -98,6 +100,16 @@ func validateContributionSettings(s *ContributionSettings) error {
 		}
 	}
 	s.Models = models
+	s.MonitorModel = strings.TrimSpace(s.MonitorModel)
+	if s.MonitorModel != "" {
+		model := s.MonitorModel
+		if len(model) > 200 || !utf8.ValidString(model) || strings.ContainsAny(model, "*?") || strings.IndexFunc(model, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 || (len(models) > 0 && !seen[model]) {
+			return infraerrors.BadRequest("CONTRIBUTION_MONITOR_INVALID", "请填写渠道支持的检测模型")
+		}
+	}
+	if s.MonitorAPIMode != "" && s.MonitorAPIMode != MonitorAPIModeChatCompletions && s.MonitorAPIMode != MonitorAPIModeResponses {
+		return infraerrors.BadRequest("CONTRIBUTION_MONITOR_INVALID", "请选择有效的检测协议")
+	}
 	return nil
 }
 
@@ -110,6 +122,7 @@ type ChannelContributionRepository interface {
 }
 
 type ChannelContributionService struct {
+	monitors     *ChannelMonitorService
 	repo         ChannelContributionRepository
 	encryptor    SecretEncryptor
 	keys         *APIKeyService
@@ -278,7 +291,11 @@ func (s *ChannelContributionService) ReviewWithModels(ctx context.Context, actor
 			return err
 		}
 	}
-	return s.repo.Review(ctx, actor, c, approve, note, account)
+	if err := s.repo.Review(ctx, actor, c, approve, note, account); err != nil {
+		return err
+	}
+	s.scheduleContributionMonitor(ctx, id)
+	return nil
 }
 
 func (s *ChannelContributionService) prepareContributionGroup(ctx context.Context, user int64, name, platform string, input *CreateGroupInput, c *ChannelContribution) error {

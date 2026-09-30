@@ -31,6 +31,7 @@ func RegisterUserRoutes(
 		contributions.GET("/groups", h.Contributions.Groups)
 		contributions.GET("/quotas", h.Contributions.Quotas)
 		contributions.GET("/statuses", h.Contributions.Statuses)
+		contributions.GET("/:id/status", h.Contributions.MonitorStatus)
 		contributions.GET("/:id/account", h.Contributions.OwnedAccount)
 		contributions.PUT("/:id/account", h.Contributions.UpdateOwnedAccount)
 

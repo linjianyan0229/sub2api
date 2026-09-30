@@ -234,6 +234,11 @@ func (r *channelContributionRepository) Review(ctx context.Context, actor int64,
 	if err != nil {
 		return err
 	}
+	if approve {
+		if err := syncContributionMonitor(dbent.NewTxContext(ctx, tx), client, c.ID); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 

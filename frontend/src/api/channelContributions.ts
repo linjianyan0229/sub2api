@@ -1,5 +1,6 @@
 import { apiClient } from './client'
 import type { CreateGroupRequest, SharedQuota } from '@/types'
+import type { UserMonitorDetail, UserMonitorView } from './channelMonitor'
 
 export type ContributionPlatform = 'openai' | 'anthropic' | 'gemini'
 export type ContributionStatus = 'pending' | 'approved' | 'rejected'
@@ -11,6 +12,8 @@ export interface ContributionSettings {
   models?: string[]
   new_group_config?: CreateGroupRequest
   show_in_status?: boolean
+  monitor_model?: string
+  monitor_api_mode?: 'chat_completions' | 'responses'
 }
 export interface ChannelContribution extends ContributionSettings {
   id: number
@@ -56,6 +59,8 @@ export interface ContributionQuota extends ContributionSettings {
   total_used: number
 }
 export interface ContributionQuotaPage { items: ContributionQuota[]; shared_quota: SharedQuota | null; has_more: boolean }
+export interface ContributionMonitor { id: number; contributor_name: string; monitor: UserMonitorView; probing: boolean }
+export interface ContributionMonitorPage { items: ContributionMonitor[]; has_more: boolean }
 
 export const channelContributionsAPI = {
   async list(admin: boolean, status = '', before = 0, signal?: AbortSignal) {
@@ -64,7 +69,8 @@ export const channelContributionsAPI = {
   async groups() { return (await apiClient.get<ContributionGroup[]>('/channel-contributions/groups')).data },
   async account(id: number, signal?: AbortSignal) { return (await apiClient.get<ContributionAccountView>(`/channel-contributions/${id}/account`, { signal })).data },
   async updateAccount(id: number, input: ContributionAccountInput) { await apiClient.put(`/channel-contributions/${id}/account`, input) },
-  async statuses(before = 0, signal?: AbortSignal) { return (await apiClient.get<ContributionQuotaPage>('/channel-contributions/statuses', { params: { before }, signal })).data },
+  async statuses(before = 0, signal?: AbortSignal) { return (await apiClient.get<ContributionMonitorPage>('/channel-contributions/statuses', { params: { before }, signal })).data },
+  async monitorStatus(id: number) { return (await apiClient.get<UserMonitorDetail>(`/channel-contributions/${id}/status`)).data },
   async submit(input: ContributionInput) { return (await apiClient.post<ChannelContribution>('/channel-contributions', input)).data },
   async review(id: number, decision: 'approved' | 'rejected', note: string, models?: string[]) {
     await apiClient.post(`/admin/channel-contributions/${id}/review`, { decision, note, models })

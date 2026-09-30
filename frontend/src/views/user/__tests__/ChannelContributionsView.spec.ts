@@ -52,7 +52,7 @@ describe('渠道提供', () => {
     await wrapper.get('#account-contribution-site').setValue('更新后的站名')
     await wrapper.get('#account-contribution-status').setValue(true)
     await wrapper.get('button[form="contribution-account-form"]').trigger('click'); await flushPromises()
-    expect(mocks.updateAccount).toHaveBeenCalledWith(7, { site_name: '更新后的站名', base_url: 'https://api.example.com/v2', api_key: '', rpm: 30, concurrency: 6, daily_limit: 20, total_limit: 100, models: ['gemini-2.5-pro'], show_in_status: true })
+    expect(mocks.updateAccount).toHaveBeenCalledWith(7, { site_name: '更新后的站名', base_url: 'https://api.example.com/v2', api_key: '', rpm: 30, concurrency: 6, daily_limit: 20, total_limit: 100, models: ['gemini-2.5-pro'], show_in_status: true, monitor_model: 'gemini-2.5-pro', monitor_api_mode: 'chat_completions' })
     expect(mocks.list).toHaveBeenCalledTimes(2)
     expect(wrapper.find('#account-contribution-key').exists()).toBe(false)
   })

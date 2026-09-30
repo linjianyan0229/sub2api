@@ -65,6 +65,9 @@ type ChannelMonitor struct {
 	// Repository implementations must keep it out of ExtraHeaders so it can
 	// never be serialized to clients or forwarded to an upstream provider.
 	DuplicateOperationID string
+	// 贡献渠道的内部归属标识，不作为请求头或用户可编辑配置暴露。
+	ContributionID int64
+	ProbeModel     string
 
 	// APIKeyDecryptFailed 表示 APIKey 字段无法解密（密钥不一致或损坏）。
 	// 此时 APIKey 为空字符串，runner / RunCheck 必须跳过该监控并提示重填。

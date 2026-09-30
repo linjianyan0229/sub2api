@@ -13,6 +13,8 @@ export default {
     keepKey: 'Leave blank to keep the current key',
     accountSaved: 'Channel configuration saved',
     showInStatus: 'Show in channel status',
+    monitorModel: 'Probe model',
+    monitorProtocol: 'Probe protocol',
     communityChannels: 'Contributed channels',
     statusLoadFailed: 'Unable to load contributed channel status',
     accessPolicy: 'Access policy',

@@ -63,7 +63,19 @@ func (s *ChannelMonitorService) ListUserView(ctx context.Context) ([]*UserMonito
 	if len(monitors) == 0 {
 		return []*UserMonitorView{}, nil
 	}
+	public := make([]*ChannelMonitor, 0, len(monitors))
+	for _, m := range monitors {
+		if m.ContributionID == 0 {
+			public = append(public, m)
+		}
+	}
+	return s.buildUserViews(ctx, public), nil
+}
 
+func (s *ChannelMonitorService) buildUserViews(ctx context.Context, monitors []*ChannelMonitor) []*UserMonitorView {
+	if len(monitors) == 0 {
+		return []*UserMonitorView{}
+	}
 	ids, primaryByID, extrasByID := collectMonitorIndexes(monitors)
 	summaries := s.BatchMonitorStatusSummary(ctx, ids, primaryByID, extrasByID)
 	latestMap := s.batchLatest(ctx, ids)
@@ -74,7 +86,7 @@ func (s *ChannelMonitorService) ListUserView(ctx context.Context) ([]*UserMonito
 		primaryLatest := pickLatest(latestMap[m.ID], m.PrimaryModel)
 		views = append(views, buildUserViewFromSummary(m, summaries[m.ID], primaryLatest, timelineMap[m.ID]))
 	}
-	return views, nil
+	return views
 }
 
 // collectMonitorIndexes 把 monitors 列表按 ID 展开为聚合查询所需的三个索引结构。
@@ -134,9 +146,14 @@ func (s *ChannelMonitorService) GetUserDetail(ctx context.Context, id int64) (*U
 	if err != nil {
 		return nil, err
 	}
-	if !m.Enabled {
+	if !m.Enabled || m.ContributionID > 0 {
 		return nil, ErrChannelMonitorNotFound
 	}
+	return s.userDetail(ctx, m)
+}
+
+func (s *ChannelMonitorService) userDetail(ctx context.Context, m *ChannelMonitor) (*UserMonitorDetail, error) {
+	id := m.ID
 
 	latest, err := s.repo.ListLatestPerModel(ctx, id)
 	if err != nil {

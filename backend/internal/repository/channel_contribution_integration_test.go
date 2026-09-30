@@ -45,6 +45,7 @@ func newContributionFixture(t *testing.T) contributionFixture {
 	}
 	t.Cleanup(func() {
 		for _, query := range []string{
+			`DELETE FROM channel_monitors WHERE extra_headers->>'sub2api:contribution_id' IN (SELECT id::text FROM channel_contributions WHERE site_name LIKE $1)`,
 			`DELETE FROM channel_contribution_batch_holds WHERE account_id IN (SELECT id FROM accounts WHERE name LIKE $1)`,
 			`DELETE FROM batch_image_jobs WHERE account_id IN (SELECT id FROM accounts WHERE name LIKE $1)`,
 			`DELETE FROM api_keys WHERE user_id IN (SELECT id FROM users WHERE email LIKE $1)`,

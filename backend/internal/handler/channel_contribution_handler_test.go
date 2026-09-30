@@ -51,7 +51,7 @@ func TestContributionAccountHandlerIgnoresManagementFields(t *testing.T) {
 	w := call(body, true)
 	require.Equal(t, 200, w.Code)
 	require.Equal(t, int64(42), repo.actor)
-	require.Equal(t, service.ContributionAccountInput{SiteName: "已通过站点", BaseURL: "https://api.example.com", APIKey: "sk-new-sensitive", RPM: 12, Concurrency: 3, DailyLimit: 20, Models: []string{"gpt-5"}, ShowInStatus: true}, repo.update)
+	require.Equal(t, service.ContributionAccountInput{SiteName: "已通过站点", BaseURL: "https://api.example.com", APIKey: "sk-new-sensitive", RPM: 12, Concurrency: 3, DailyLimit: 20, Models: []string{"gpt-5"}, ShowInStatus: true, MonitorModel: "gpt-5", MonitorAPIMode: "chat_completions"}, repo.update)
 	require.NotContains(t, w.Body.String(), "sk-new-sensitive")
 	require.NotContains(t, service.RedactAuditBody([]byte(body), "application/json"), "sk-new-sensitive")
 	require.Equal(t, 400, call(`{"site_name":"`+strings.Repeat("x", 65536)+`"}`, true).Code)

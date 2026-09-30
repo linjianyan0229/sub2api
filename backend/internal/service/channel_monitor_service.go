@@ -81,7 +81,8 @@ type ChannelMonitorService struct {
 	// quotaFetcher 由 wire 通过 SetQuotaFetcher 注入（accountUsage/CN 服务在本服务
 	// 之后构造，构造参数注入会破坏既有依赖顺序）。nil 时 fail-closed：
 	// 配额模式的检测产出「未配置」错误快照，Create/Update 关联账号直接报错。
-	quotaFetcher *ChannelMonitorQuotaFetcher
+	quotaFetcher  *ChannelMonitorQuotaFetcher
+	contributions contributionMonitorRepository
 }
 
 const maxChannelMonitorNameRunes = 100
@@ -215,6 +216,9 @@ func (s *ChannelMonitorService) Duplicate(
 	source, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if source.ContributionID > 0 {
+		return nil, ErrChannelMonitorNotFound
 	}
 
 	plainAPIKey, err := s.decryptAPIKeyForDuplicate(source)
@@ -432,6 +436,9 @@ func (s *ChannelMonitorService) Update(ctx context.Context, id int64, p ChannelM
 	if err != nil {
 		return nil, err
 	}
+	if existing.ContributionID > 0 {
+		return nil, ErrChannelMonitorNotFound
+	}
 	if err := applyMonitorUpdate(existing, p); err != nil {
 		return nil, err
 	}
@@ -614,6 +621,11 @@ func (s *ChannelMonitorService) RunCheck(ctx context.Context, id int64) ([]*Chec
 	if err != nil {
 		return nil, err
 	}
+	if m.ContributionID > 0 {
+		if err := s.prepareContributionProbe(ctx, m); err != nil {
+			return nil, err
+		}
+	}
 	checkMode := defaultCheckMode(m.CheckMode)
 	if checkMode != MonitorCheckModeQuota && m.APIKeyDecryptFailed {
 		return nil, ErrChannelMonitorAPIKeyDecryptFailed
@@ -715,7 +727,12 @@ func (s *ChannelMonitorService) runChecksConcurrent(ctx context.Context, m *Chan
 	for i, model := range models {
 		i, model := i, model
 		eg.Go(func() error {
-			r := runCheckForModel(ctx, m.Provider, m.Endpoint, m.APIKey, model, opts)
+			probeModel := model
+			if m.ContributionID > 0 && m.ProbeModel != "" {
+				probeModel = m.ProbeModel
+			}
+			r := runCheckForModel(ctx, m.Provider, m.Endpoint, m.APIKey, probeModel, opts)
+			r.Model = model
 			r.PingLatencyMs = pingMs
 			mu.Lock()
 			results[i] = r
@@ -864,6 +881,10 @@ func (s *ChannelMonitorService) cleanupOldRollups(ctx context.Context, today tim
 // 解密失败时把字段清空 + 设置 APIKeyDecryptFailed=true（不返回错误，避免阻断列表渲染）。
 // runner / RunCheck 必须读取该标志位并拒绝执行检测。
 func (s *ChannelMonitorService) decryptInPlace(m *ChannelMonitor) {
+	if m != nil && m.ContributionID > 0 {
+		m.APIKey = ""
+		return
+	}
 	if m == nil || m.APIKey == "" {
 		return
 	}

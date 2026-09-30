@@ -1064,6 +1064,7 @@ func ProvideChannelMonitorRunner(
 	svc *ChannelMonitorService,
 	settingService *SettingService,
 	quotaFetcher *ChannelMonitorQuotaFetcher,
+	contributions *ChannelContributionService,
 ) *ChannelMonitorRunner {
 	r := NewChannelMonitorRunner(svc, settingService)
 	if svc != nil {
@@ -1072,6 +1073,12 @@ func ProvideChannelMonitorRunner(
 		svc.SetRuntimeReader(settingService)
 		svc.SetScheduler(r)
 		svc.SetQuotaFetcher(quotaFetcher)
+	}
+	if contributions != nil {
+		contributions.SetMonitorService(svc)
+		if err := contributions.InitializeMonitors(context.Background()); err != nil {
+			logger.LegacyPrintf("service.channel_monitor", "初始化贡献渠道监控失败: %v", err)
+		}
 	}
 	r.Start()
 	return r

@@ -142,7 +142,47 @@ func (h *ChannelContributionHandler) Quotas(c *gin.Context) {
 }
 
 func (h *ChannelContributionHandler) Statuses(c *gin.Context) {
-	h.catalog(c, true)
+	actor, ok := contributionActor(c)
+	if !ok {
+		return
+	}
+	before, err := strconv.ParseInt(c.DefaultQuery("before", "0"), 10, 64)
+	if err != nil || before < 0 {
+		response.BadRequest(c, "无效的分页游标")
+		return
+	}
+	views, err := h.service.MonitorViews(c.Request.Context(), actor, before)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	more := len(views) > 50
+	if more {
+		views = views[:50]
+	}
+	items := make([]gin.H, 0, len(views))
+	for _, v := range views {
+		items = append(items, gin.H{"id": v.ID, "contributor_name": v.ContributorName, "monitor": userMonitorViewToItem(v.Monitor, false), "probing": v.Probing})
+	}
+	response.Success(c, gin.H{"items": items, "has_more": more})
+}
+
+func (h *ChannelContributionHandler) MonitorStatus(c *gin.Context) {
+	actor, ok := contributionActor(c)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "无效的申请 ID")
+		return
+	}
+	detail, err := h.service.MonitorDetail(c.Request.Context(), actor, id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, userMonitorDetailToResponse(detail))
 }
 
 func (h *ChannelContributionHandler) catalog(c *gin.Context, statusPage bool) {
