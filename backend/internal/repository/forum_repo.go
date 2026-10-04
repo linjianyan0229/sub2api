@@ -47,6 +47,9 @@ func forumMessages(ctx context.Context, tx *sql.Tx, suffix string, args ...any) 
 	}
 	return out, rows.Err()
 }
+func forumPinnedMessages(ctx context.Context, tx *sql.Tx, retentionDays int) ([]service.ForumMessage, error) {
+	return forumMessages(ctx, tx, `WHERE m.pinned AND ($1=0 OR m.created_at > NOW()-make_interval(days => $1)) ORDER BY m.id DESC LIMIT 3`, retentionDays)
+}
 func (r *forumRepository) Page(ctx context.Context, user, before int64) (*service.ForumPage, error) {
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
 	if err != nil {
@@ -71,7 +74,7 @@ func (r *forumRepository) Page(ctx context.Context, user, before int64) (*servic
 	if p.HasMore {
 		p.Messages = p.Messages[:50]
 	}
-	p.Pinned, err = forumMessages(ctx, tx, `WHERE m.pinned AND ($1=0 OR m.created_at > NOW()-make_interval(days => $1)) ORDER BY m.id DESC LIMIT 3`, p.Settings.RetentionDays)
+	p.Pinned, err = forumPinnedMessages(ctx, tx, p.Settings.RetentionDays)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +171,13 @@ func (r *forumRepository) Events(ctx context.Context, after *int64) (*service.Fo
 	}
 	defer tx.Rollback()
 	result := &service.ForumEvents{Arrivals: []service.ForumArrival{}}
-	if err = tx.QueryRowContext(ctx, `SELECT last_arrival_id FROM forum_settings WHERE id=1`).Scan(&result.Cursor); err != nil {
+	var retentionDays int
+	if err = tx.QueryRowContext(ctx, `SELECT last_arrival_id,retention_days FROM forum_settings WHERE id=1`).Scan(&result.Cursor, &retentionDays); err != nil {
+		return nil, err
+	}
+	// Pins are a current snapshot, independent of the arrival cursor.
+	result.Pinned, err = forumPinnedMessages(ctx, tx, retentionDays)
+	if err != nil {
 		return nil, err
 	}
 	// 首次连接只建立游标，不重播之前的上线记录。

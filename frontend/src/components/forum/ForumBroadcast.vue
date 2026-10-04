@@ -2,7 +2,9 @@
 <script setup lang="ts">
 import { defineAsyncComponent, onBeforeUnmount, onMounted, ref } from 'vue'
 import { forumAPI, type ForumArrival } from '@/api/forum'
+import { useForumStore } from '@/stores/forum'
 const ForumCelebration = defineAsyncComponent(() => import('./ForumCelebration.vue'))
+const forum = useForumStore()
 const current = ref<ForumArrival | null>(null)
 const queue: ForumArrival[] = []
 let cursor: number | undefined
@@ -28,6 +30,7 @@ async function poll() {
       const initial = await forumAPI.events(undefined, controller.signal)
       if (stopped) return
       cursor = initial.cursor
+      forum.setPinned(initial.pinned ?? [])
     }
     if (!registered) {
       await forumAPI.arrive(controller.signal)
@@ -36,6 +39,7 @@ async function poll() {
     }
     const result = await forumAPI.events(cursor, controller.signal)
     if (stopped) return
+    forum.setPinned(result.pinned ?? [])
     // 游标只前进，重复响应和网络重试不能让同一事件再次入队。
     const previous = cursor
     const latest = Math.max(cursor, result.cursor)

@@ -58,6 +58,10 @@ const messages: Record<string, string> = {
   'usage.stream': 'Stream',
   'usage.sync': 'Sync',
   'usage.nativeCompactionV2': 'Compaction',
+  'usage.latencyFirstToken': 'First',
+  'usage.latencyDuration': 'Total',
+  'usage.latencyOutput': 'Output',
+  'usage.outputTokensPerSecondHint': 'Output tokens / (total duration - first-token latency); falls back to total duration.',
   'admin.usage.billingModeToken': 'Token',
   'admin.usage.billingModePerRequest': 'Per request',
   'admin.usage.billingModeImage': 'Image',
@@ -127,6 +131,76 @@ const baseImageRow = {
   image_size_source: null,
   image_size_breakdown: null,
 }
+
+describe('shared UsageTable latency', () => {
+  it.each([
+    { role: 'admin', showAccountBilling: true, showUpstreamEndpoint: true },
+    { role: 'user', showAccountBilling: false, showUpstreamEndpoint: false },
+  ])('shows output speed alongside first-token and total latency for $role records', (options) => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        showAccountBilling: options.showAccountBilling,
+        showUpstreamEndpoint: options.showUpstreamEndpoint,
+        data: [
+          {
+            ...baseImageRow,
+            request_id: 'req-stream',
+            request_type: 'stream',
+            stream: true,
+            output_tokens: 100,
+            duration_ms: 3000,
+            first_token_ms: 1000,
+          },
+          {
+            ...baseImageRow,
+            request_id: 'req-sync',
+            request_type: 'sync',
+            stream: false,
+            output_tokens: 100,
+            duration_ms: 3000,
+            first_token_ms: null,
+          },
+          {
+            ...baseImageRow,
+            request_id: 'req-missing-duration',
+            duration_ms: null,
+            first_token_ms: null,
+          },
+          {
+            ...baseImageRow,
+            request_id: 'req-no-generation-duration',
+            output_tokens: 100,
+            duration_ms: 1000,
+            first_token_ms: 1000,
+          },
+        ],
+        columns: [{ key: 'latency', label: 'Latency' }],
+      },
+      global: {
+        stubs: {
+          DataTable: {
+            props: ['data'],
+            template: '<div><div v-for="row in data" :key="row.request_id" data-testid="latency-cell"><slot name="cell-latency" :row="row" /></div></div>',
+          },
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    const speeds = wrapper.findAll('[data-testid="output-tokens-per-second"]')
+    expect(speeds.map((speed) => speed.text())).toEqual(['50.0 t/s', '33.3 t/s', '-', '-'])
+    expect(speeds[0].attributes('title')).toBe(messages['usage.outputTokensPerSecondHint'])
+    const firstCell = wrapper.get('[data-testid="latency-cell"]')
+    expect(firstCell.text()).toContain('First')
+    expect(firstCell.text()).toContain('1.00s')
+    expect(firstCell.text()).toContain('Total')
+    expect(firstCell.text()).toContain('3.00s')
+    expect(firstCell.text()).toContain('Output')
+    wrapper.unmount()
+  })
+})
 
 describe('admin UsageTable tooltip', () => {
   beforeEach(() => {

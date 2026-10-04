@@ -1,5 +1,5 @@
 <template>
-  <header class="glass sticky top-0 z-30 border-b border-gray-200/50 dark:border-dark-700/50">
+  <header class="glass sticky top-0 z-30 border-b border-gray-200/50 dark:border-dark-700/50" :class="{ 'header-has-pins': user && forumStore.pinned.length }">
     <div class="flex h-16 items-center justify-between gap-2 px-2 sm:px-4 md:px-6">
       <!-- Left: Mobile Menu Toggle + Page Title -->
       <div class="flex shrink-0 items-center gap-2 sm:gap-4">
@@ -21,8 +21,16 @@
         </div>
       </div>
 
+      <ForumPinnedBar
+        v-if="user && forumStore.pinned.length"
+        class="min-w-0 flex-1"
+        :messages="forumStore.pinned"
+        compact
+        data-global-forum-pins
+      />
+
       <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown -->
-      <div class="flex min-w-0 items-center gap-1 sm:gap-3">
+      <div class="flex min-w-0 shrink-0 items-center gap-1 sm:gap-3">
         <!-- Announcement Bell -->
         <AnnouncementBell v-if="user" />
 
@@ -44,20 +52,20 @@
           :to="{ path: '/model-plaza', query: { embedded: '1' } }"
           :title="t('nav.modelPlaza')"
           :aria-label="t('nav.modelPlaza')"
-          class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+          class="header-secondary flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
         >
           <Icon name="grid" size="sm" />
           <span class="hidden sm:inline">{{ t('nav.modelPlaza') }}</span>
         </router-link>
 
         <!-- Language Switcher -->
-        <LocaleSwitcher />
+        <div class="header-secondary"><LocaleSwitcher /></div>
 
         <!-- Subscription Progress (for users with active subscriptions; not mounted at all when the feature is off) -->
         <SubscriptionProgressMini v-if="user && !authStore.isSharedQuota && subscriptionFeatureEnabled" />
 
         <!-- Balance Display -->
-        <div v-if="authStore.isAdmin && user?.site_shared_quota" data-testid="admin-site-quota" class="group relative flex flex-col rounded-xl bg-teal-50 px-2 py-1 dark:bg-teal-900/20 sm:px-3" tabindex="0">
+        <div v-if="authStore.isAdmin && user?.site_shared_quota" data-testid="admin-site-quota" class="header-secondary group relative flex flex-col rounded-xl bg-teal-50 px-2 py-1 dark:bg-teal-900/20 sm:px-3" tabindex="0">
           <span class="text-[10px] text-teal-700 dark:text-teal-300">{{ t('common.sharedQuota') }}</span>
           <span class="text-xs font-semibold tabular-nums text-teal-800 dark:text-teal-200">{{ formatHeaderMoney(user.site_shared_quota.remaining) }}</span>
           <div class="pointer-events-none absolute right-0 top-full mt-2 hidden w-64 rounded-lg border border-gray-200 bg-white p-3 text-xs shadow-lg group-hover:block group-focus:block dark:border-dark-700 dark:bg-dark-800">
@@ -164,6 +172,21 @@
                 </div>
               </div>
 
+              <div v-if="forumStore.pinned.length" class="border-b border-gray-100 py-2 dark:border-dark-700 sm:hidden" data-mobile-header-extras>
+                <div class="px-4 py-1"><LocaleSwitcher /></div>
+                <router-link v-if="modelPlazaEnabled" :to="{ path: '/model-plaza', query: { embedded: '1' } }" class="dropdown-item" @click="closeDropdown">
+                  <Icon name="grid" size="sm" />
+                  {{ t('nav.modelPlaza') }}
+                </router-link>
+                <div v-if="authStore.isAdmin && user.site_shared_quota" class="space-y-1 px-4 py-2 text-xs text-teal-700 dark:text-teal-300">
+                  <div class="flex justify-between gap-2"><span>{{ t('common.sharedQuota') }}</span><span>{{ formatHeaderMoney(user.site_shared_quota.remaining) }}</span></div>
+                  <div class="flex justify-between gap-2"><span>{{ t('common.dailyQuota') }}</span><span>{{ formatHeaderMoney(user.site_shared_quota.total) }}</span></div>
+                  <div class="flex justify-between gap-2"><span>{{ t('common.usedQuota') }}</span><span>{{ formatHeaderMoney(user.site_shared_quota.used) }}</span></div>
+                  <div class="flex justify-between gap-2"><span>{{ t('common.frozenBalance') }}</span><span>{{ formatHeaderMoney(user.site_shared_quota.held) }}</span></div>
+                  <p>{{ t('common.quotaResetsAt') }}: {{ new Date(user.site_shared_quota.resets_at).toLocaleString() }}</p>
+                </div>
+              </div>
+
               <div class="py-1">
                 <router-link to="/profile" @click="closeDropdown" class="dropdown-item">
                   <Icon name="user" size="sm" />
@@ -259,6 +282,8 @@ import { useAdminSettingsStore } from '@/stores/adminSettings'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMini.vue'
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
+import ForumPinnedBar from '@/components/forum/ForumPinnedBar.vue'
+import { useForumStore } from '@/stores/forum'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
@@ -271,6 +296,7 @@ const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const adminSettingsStore = useAdminSettingsStore()
+const forumStore = useForumStore()
 
 const user = computed(() => authStore.user)
 const dropdownOpen = ref(false)
@@ -381,6 +407,9 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+@media (max-width: 639px) {
+  .header-has-pins .header-secondary { display: none; }
+}
 .dropdown-enter-active,
 .dropdown-leave-active {
   transition: all 0.2s ease;

@@ -9,6 +9,13 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/account/__tests__/OpenAIReferralCell.transport.spec.ts \
 	src/components/account/__tests__/OpenAIQuotaResetCell.spark_shadow.spec.ts \
 	src/components/keys/__tests__/BulkEditKeysModal.spec.ts \
+	src/components/forum/__tests__/ForumPinnedBar.spec.ts \
+	src/components/forum/__tests__/ForumGlobalPins.spec.ts \
+	src/components/forum/__tests__/ForumBroadcast.spec.ts \
+	src/components/forum/__tests__/ForumComposer.spec.ts \
+	src/views/user/__tests__/ForumView.spec.ts \
+	src/components/admin/usage/__tests__/UsageTable.spec.ts \
+	src/utils/__tests__/usageThroughput.spec.ts \
 	src/components/admin/user/__tests__/UserPlatformQuotaModal.spec.ts \
 	src/views/user/__tests__/KeysView.spec.ts \
 	src/api/__tests__/channelMonitorV2.spec.ts \

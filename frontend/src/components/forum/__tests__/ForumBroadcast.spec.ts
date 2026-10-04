@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+import { useForumStore } from '@/stores/forum'
 import ForumBroadcast from '../ForumBroadcast.vue'
 
 const { events, arrive } = vi.hoisted(() => ({ events: vi.fn(), arrive: vi.fn() }))
@@ -7,6 +9,7 @@ vi.mock('@/api/forum', () => ({ forumAPI: { events, arrive } }))
 vi.mock('../ForumCelebration.vue', () => ({ __esModule: true, default: { props: ['arrival'], emits: ['close'], template: '<button data-broadcast @click="$emit(\'close\')">{{ arrival.author.username }}</button>' } }))
 const arrival = (id: number, age = 0) => ({ id, author: { user_id: 7, username: '星河', avatar_url: '', actual_cost: 123 }, rank: 1, created_at: new Date(Date.now() - age).toISOString() })
 beforeEach(() => {
+  setActivePinia(createPinia())
   vi.useFakeTimers()
   events.mockReset(); arrive.mockReset(); arrive.mockResolvedValue(undefined)
   events.mockResolvedValue({ cursor: 10, arrivals: [] })
@@ -15,6 +18,27 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers() })
 
 describe('上线通报', () => {
+  it('首次连接和无新事件轮询也更新置顶，取消置顶后清空全局栏', async () => {
+    const pinned = [{ id: 1, author: arrival(1).author, rank: 0, content: '置顶公告', pinned: true, created_at: new Date().toISOString() }]
+    events.mockResolvedValue({ cursor: 10, arrivals: [], pinned })
+    const wrapper = mount(ForumBroadcast)
+    await flushPromises()
+    expect(useForumStore().pinned).toEqual(pinned)
+    expect(wrapper.find('[data-broadcast]').exists()).toBe(false)
+    events.mockResolvedValue({ cursor: 10, arrivals: [], pinned: [] })
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(useForumStore().pinned).toEqual([])
+    wrapper.unmount()
+  })
+  it('卸载后的迟到响应不能恢复旧会话的置顶', async () => {
+    let resolve!: (value: unknown) => void
+    events.mockImplementationOnce(() => new Promise(r => { resolve = r }))
+    const wrapper = mount(ForumBroadcast)
+    wrapper.unmount()
+    resolve({ cursor: 10, arrivals: [], pinned: [{ id: 1, content: '旧会话' }] })
+    await flushPromises()
+    expect(useForumStore().pinned).toEqual([])
+  })
   it('先建立游标再登记上线，重复响应和重复事件只播放一次', async () => {
     const event = arrival(11)
     events.mockResolvedValueOnce({ cursor: 10, arrivals: [] }).mockResolvedValue({ cursor: 11, arrivals: [event, event] })

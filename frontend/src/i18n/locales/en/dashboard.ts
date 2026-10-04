@@ -386,6 +386,8 @@ export default {
     latency: 'Latency',
     latencyFirstToken: 'First',
     latencyDuration: 'Total',
+    latencyOutput: 'Output',
+    outputTokensPerSecondHint: 'Output tokens per second: output tokens / (total duration - first-token latency). Estimated using total duration when first-token latency is unavailable.',
     time: 'Time',
     ws: 'WS',
     stream: 'Stream',

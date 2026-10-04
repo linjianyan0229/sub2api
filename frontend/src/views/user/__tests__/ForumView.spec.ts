@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
+import { useForumStore } from '@/stores/forum'
 import ForumView from '../ForumView.vue'
 
 const mocks = vi.hoisted(() => ({ page: vi.fn(), send: vi.fn(), pin: vi.fn(), mute: vi.fn(), mutes: vi.fn(), settings: vi.fn(), clear: vi.fn(), success: vi.fn(), error: vi.fn(), auth: { isAdmin: false, user: { id: 1 } } }))
@@ -18,10 +20,42 @@ function snapshot(muted: string | null = null) {
     pinned: [], settings: { muted_until: muted, retention_days: 30 }, muted_until: null, has_more: false
   }
 }
-beforeEach(() => { vi.useFakeTimers(); vi.clearAllMocks(); mocks.auth.isAdmin = false; mocks.page.mockResolvedValue(snapshot()); mocks.mutes.mockResolvedValue([]) })
+beforeEach(() => { setActivePinia(createPinia()); vi.useFakeTimers(); vi.clearAllMocks(); mocks.auth.isAdmin = false; mocks.page.mockResolvedValue(snapshot()); mocks.mutes.mockResolvedValue([]) })
 afterEach(() => { vi.useRealTimers() })
 
 describe('论坛讨论', () => {
+  it('自己的消息使用右侧布局，其他消息使用左侧布局并保持时间顺序', async () => {
+    const result = snapshot()
+    const other = result.messages[0]
+    const own = { ...other, id: 2, author: { ...other.author, user_id: 1, username: '自己' } }
+    mocks.page.mockResolvedValue({ ...result, messages: [own, other] })
+    const wrapper = mount(ForumView)
+    await flushPromises()
+    const messages = wrapper.findAll('.forum-message')
+    expect(messages.map(message => message.attributes('data-message-id'))).toEqual(['1', '2'])
+    expect(messages[0].classes()).not.toContain('own-message')
+    expect(messages[1].classes()).toContain('own-message')
+    wrapper.unmount()
+  })
+  it('正文不重复展示置顶区域，仍同步导航栏状态并保留消息的取消置顶操作', async () => {
+    mocks.auth.isAdmin = true
+    const result = snapshot()
+    const message = { ...result.messages[0], pinned: true }
+    mocks.page.mockResolvedValue({ ...result, messages: [message], pinned: [message] })
+    const wrapper = mount(ForumView)
+    await flushPromises()
+    expect(wrapper.find('.forum-pinned').exists()).toBe(false)
+    expect(wrapper.find('.pin-capsule').exists()).toBe(false)
+    expect(wrapper.find('[data-pin-detail]').exists()).toBe(false)
+    expect(useForumStore().pinned).toHaveLength(1)
+    mocks.page.mockResolvedValue(result)
+    await wrapper.get('.message-meta .forum-action').trigger('click')
+    await flushPromises()
+    expect(mocks.pin).toHaveBeenCalledWith(1, false)
+    expect(useForumStore().pinned).toEqual([])
+    expect(wrapper.find('.forum-pinned').exists()).toBe(false)
+    wrapper.unmount()
+  })
   it('展示昵称、累计 USD 和头像，发言作为纯文本输出，普通用户没有管理入口', async () => {
     const wrapper = mount(ForumView)
     await flushPromises()
@@ -54,13 +88,13 @@ describe('论坛讨论', () => {
     expect(mocks.error).toHaveBeenCalledWith('FORUM_MUTED')
     wrapper.unmount()
   })
-  it('管理员称号在发言与置顶中展示，普通账号同样昵称也不能获得称号', async () => {
+  it('管理员称号在发言中展示，普通账号同样昵称也不能获得称号', async () => {
     const result = snapshot()
     const message = { ...result.messages[0], author: { ...result.messages[0].author, username: '管理员', is_admin: true } }
     mocks.page.mockResolvedValue({ ...result, messages: [message], pinned: [message] })
     const wrapper = mount(ForumView)
     await flushPromises()
-    expect(wrapper.findAllComponents({ name: 'ForumAdminBadge' })).toHaveLength(2)
+    expect(wrapper.findAllComponents({ name: 'ForumAdminBadge' })).toHaveLength(1)
     mocks.page.mockResolvedValue({ ...result, messages: [{ ...message, author: { ...message.author, is_admin: false } }], pinned: [] })
     await wrapper.get('header button').trigger('click')
     await flushPromises()

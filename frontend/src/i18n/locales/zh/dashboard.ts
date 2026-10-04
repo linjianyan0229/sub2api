@@ -391,6 +391,8 @@ export default {
     latency: '延迟',
     latencyFirstToken: '首字',
     latencyDuration: '总耗时',
+    latencyOutput: '输出',
+    outputTokensPerSecondHint: '每秒输出 Token 数：输出 Token 数 ÷（总耗时 − 首字耗时）。未记录首字耗时时按总耗时估算。',
     time: '时间',
     ws: 'WS',
     stream: '流式',

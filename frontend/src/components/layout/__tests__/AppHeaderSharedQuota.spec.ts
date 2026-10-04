@@ -1,5 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
+import { createPinia } from 'pinia'
 import AppHeader from '../AppHeader.vue'
 
 const state = vi.hoisted(() => ({
@@ -16,7 +17,7 @@ vi.mock('@/utils/siteBillingMode', () => ({ resolveSiteBillingMode: () => 'balan
 
 describe('管理员共享额度展示', () => {
   it('独立显示全站共享额度，同时保留个人余额、冻结与总额', () => {
-    const wrapper = mount(AppHeader, { global: { stubs: { LocaleSwitcher: true, AnnouncementBell: true, SubscriptionProgressMini: true, RouterLink: true } } })
+    const wrapper = mount(AppHeader, { global: { plugins: [createPinia()], stubs: { LocaleSwitcher: true, AnnouncementBell: true, SubscriptionProgressMini: true, RouterLink: true } } })
     const site = wrapper.get('[data-testid="admin-site-quota"]')
     expect(site.text()).toContain('common.sharedQuota')
     expect(site.text()).toContain('$85.00')

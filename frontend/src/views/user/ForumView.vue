@@ -13,15 +13,6 @@
       </header>
       <p v-if="failed" role="alert" class="forum-error">{{ t('forum.loadFailed') }}</p>
       <section class="discussion-space" :aria-label="t('nav.forum')">
-        <section v-if="page?.pinned.length" class="forum-pinned" :aria-label="t('forum.pinned')">
-          <span class="pin-label">{{ t('forum.pinned') }}</span>
-          <div class="pinned-content">
-            <article v-for="message in page.pinned" :key="message.id" class="pinned-message">
-              <div class="flex items-center justify-between gap-3"><div class="flex min-w-0 flex-wrap items-center gap-2"><strong>{{ message.author.username || t('leaderboard.anonymous') }}</strong><ForumAdminBadge v-if="message.author.is_admin" /></div><button v-if="auth.isAdmin" class="forum-action" :disabled="busy" @click="act(() => forumAPI.pin(message.id, false))">{{ t('forum.unpin') }}</button></div>
-              <p class="forum-body">{{ message.content }}</p>
-            </article>
-          </div>
-        </section>
         <div ref="history" class="forum-history" tabindex="0" :aria-label="t('forum.discussions')">
           <div v-if="page?.has_more || before" class="history-navigation">
             <button v-if="page?.has_more" :disabled="loading" @click="older">{{ t('forum.older') }}</button>
@@ -106,11 +97,13 @@ import ForumComposer from '@/components/forum/ForumComposer.vue'
 import ForumDrawer from '@/components/forum/ForumDrawer.vue'
 import { forumAPI, type ForumAuthor, type ForumMute, type ForumPage } from '@/api/forum'
 import { useAuthStore, useAppStore } from '@/stores'
+import { useForumStore } from '@/stores/forum'
 import { formatCostFixed } from '@/utils/format'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
 const app = useAppStore()
+const forum = useForumStore()
 const page = ref<ForumPage | null>(null)
 const loading = ref(false)
 const failed = ref(false)
@@ -148,6 +141,7 @@ async function load() {
     const atBottom = !page.value || !history.value || history.value.scrollHeight - history.value.clientHeight - history.value.scrollTop < 80
     if (!page.value) retention.value = result.settings.retention_days
     page.value = result
+    forum.setPinned(result.pinned)
     failed.value = false
     now.value = Date.now()
     await nextTick()
@@ -201,24 +195,19 @@ onBeforeUnmount(() => { stopped = true; clearInterval(timer); controller?.abort(
 .forum-history { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #94a3b830 transparent; padding: 12px 20px 24px; }
 .forum-history:focus-visible { outline: 1px solid #14b8a640; outline-offset: -1px; }
 .discussion-stream { max-width: 860px; margin: 0 auto; }
-.forum-message { display: flex; gap: 16px; padding: 24px 0; }
-.forum-message + .forum-message { border-top: 1px solid var(--forum-line); }
-.message-content { flex: 1; min-width: 0; }
+.forum-message { display: flex; align-items: flex-start; gap: 12px; padding: 16px 0; }
+.own-message { flex-direction: row-reverse; }
+.message-content { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; max-width: min(78%, 680px); }
+.own-message .message-content { align-items: flex-end; }
+.own-message .message-author, .own-message .message-meta { justify-content: flex-end; }
 .message-author { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 12px; font-size: 13px; }
 .message-author strong { max-width: 100%; overflow-wrap: anywhere; font-weight: 600; }
 .message-usage { color: var(--forum-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
 .forum-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.85; }
-.message-text { display: inline-block; max-width: 100%; margin-top: 9px; padding: 12px 16px; border-radius: 2px 16px 16px; background: #94a3b80e; font-size: 14px; }
-.own-message .message-text { background: #14b8a60d; border-left: 2px solid #14b8a63d; }
+.message-text { max-width: 100%; margin-top: 9px; padding: 12px 16px; border: 1px solid var(--forum-line); border-radius: 4px 18px 18px; background: #ffffffa6; font-size: 14px; text-align: left; }
+.own-message .message-text { border-color: #14b8a62e; border-radius: 18px 4px 18px 18px; background: #14b8a612; }
 .message-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 15px; margin-top: 10px; font-size: 10px; color: var(--forum-muted); }
 .forum-rank { padding: 2px 6px; border: 1px solid #d9770624; border-radius: 5px; color: #b45309; background: #f59e0b0a; font-size: 10px; font-weight: 600; }
-.forum-pinned { display: flex; flex: none; gap: 20px; max-height: 180px; overflow-y: auto; padding: 16px 20px; border-bottom: 1px solid var(--forum-line); background: linear-gradient(90deg,#14b8a608,transparent); }
-.pin-label { flex: none; color: var(--forum-accent); font-size: 11px; margin-top: 2px; }
-.pinned-content { flex: 1; min-width: 0; }
-.pinned-message { font-size: 12px; }
-.pinned-message + .pinned-message { margin-top: 12px; }
-.pinned-message strong { font-weight: 600; }
-.pinned-message .forum-body { margin-top: 4px; }
 .forum-dock-area { position: relative; flex: none; z-index: 2; padding: 16px 20px 8px; }
 .forum-dock-area::before { content: ''; position: absolute; left: 15%; right: 15%; top: 0; height: 1px; background: linear-gradient(90deg,transparent,#14b8a62e,transparent); }
 .forum-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 260px; height: 80%; color: #0f766e55; }
@@ -236,5 +225,5 @@ button:focus-visible { outline: 2px solid #14b8a6; outline-offset: 4px; }
 .dark .forum-rank { color: #fcd68b; border-color: #fcd68b26; background: #fcd68b08; }
 .dark .message-text { background: #ffffff04; }
 .dark .own-message .message-text { background: #14b8a610; }
-@media (max-width: 767px) { .forum-page { height: calc(100dvh - 98px); min-height: 390px; } .forum-heading { padding-bottom: 16px; } .forum-title { gap: 10px; } .forum-title h1 { font-size: 22px; } .forum-emblem { width: 36px; height: 36px; border-radius: 12px; } .forum-heading-actions { gap: 5px; } .forum-manage-button { padding: 8px; font-size: 11px; } .forum-manage-button svg { display: none; } .forum-history { padding: 8px 0 18px; } .forum-message { gap: 10px; padding: 20px 0; } .message-text { padding: 9px 11px; } .forum-dock-area { padding: 12px 0 4px; } .forum-pinned { padding: 12px 0; gap: 12px; } }
+@media (max-width: 767px) { .forum-page { height: calc(100dvh - 98px); min-height: 390px; } .forum-heading { padding-bottom: 16px; } .forum-title { gap: 10px; } .forum-title h1 { font-size: 22px; } .forum-emblem { width: 36px; height: 36px; border-radius: 12px; } .forum-heading-actions { gap: 5px; } .forum-manage-button { padding: 8px; font-size: 11px; } .forum-manage-button svg { display: none; } .forum-history { padding: 8px 0 18px; } .forum-message { gap: 10px; padding: 14px 0; } .message-content { max-width: calc(100% - 66px); } .message-text { padding: 9px 11px; } .forum-dock-area { padding: 12px 0 4px; } }
 </style>

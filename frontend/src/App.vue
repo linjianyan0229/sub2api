@@ -6,6 +6,7 @@ import NavigationProgress from '@/components/common/NavigationProgress.vue'
 import { resolveRouteDocumentTitle } from '@/router/title'
 import AnnouncementPopup from '@/components/common/AnnouncementPopup.vue'
 import ForumBroadcast from '@/components/forum/ForumBroadcast.vue'
+import { useForumStore } from '@/stores/forum'
 import { useAppStore, useAuthStore, useSubscriptionStore, useAnnouncementStore, useAdminSettingsStore } from '@/stores'
 import { getSetupStatus } from '@/api/setup'
 import { updateFavicon } from '@/utils/branding'
@@ -19,6 +20,9 @@ const authStore = useAuthStore()
 const subscriptionStore = useSubscriptionStore()
 const announcementStore = useAnnouncementStore()
 const adminSettingsStore = useAdminSettingsStore()
+const forumStore = useForumStore()
+
+watch(() => authStore.user?.id, () => forumStore.reset(), { immediate: true, flush: 'sync' })
 
 function updateDocumentTitle() {
   const customMenuItems = [

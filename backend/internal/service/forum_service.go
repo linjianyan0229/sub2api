@@ -53,6 +53,7 @@ type ForumArrival struct {
 type ForumEvents struct {
 	Cursor   int64          `json:"cursor"`
 	Arrivals []ForumArrival `json:"arrivals"`
+	Pinned   []ForumMessage `json:"pinned"`
 }
 type ForumMute struct {
 	Author     ForumAuthor `json:"author"`

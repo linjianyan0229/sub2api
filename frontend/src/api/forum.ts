@@ -29,6 +29,11 @@ export interface ForumPage {
   has_more: boolean
 }
 export interface ForumMute { author: ForumAuthor; muted_until: string }
+export interface ForumEvents {
+  cursor: number
+  arrivals: ForumArrival[]
+  pinned: ForumMessage[]
+}
 
 export const forumAPI = {
   async page(before = 0, signal?: AbortSignal) {
@@ -38,7 +43,7 @@ export const forumAPI = {
     return (await apiClient.post<ForumMessage>('/forum/messages', { content })).data
   },
   async events(after?: number, signal?: AbortSignal) {
-    return (await apiClient.get<{ cursor: number; arrivals: ForumArrival[] }>('/forum/events', { params: { after }, signal })).data
+    return (await apiClient.get<ForumEvents>('/forum/events', { params: { after }, signal })).data
   },
   async arrive(signal?: AbortSignal) {
     await apiClient.post('/forum/arrival', undefined, { signal })
