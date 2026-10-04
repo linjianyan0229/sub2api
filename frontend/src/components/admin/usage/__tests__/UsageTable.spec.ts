@@ -60,8 +60,8 @@ const messages: Record<string, string> = {
   'usage.nativeCompactionV2': 'Compaction',
   'usage.latencyFirstToken': 'First',
   'usage.latencyDuration': 'Total',
-  'usage.latencyOutput': 'Output',
-  'usage.outputTokensPerSecondHint': 'Output tokens / (total duration - first-token latency); falls back to total duration.',
+  'usage.latencyAverageTps': 'Avg TPS',
+  'usage.averageTpsHint': 'Average TPS = output tokens / total duration (seconds).',
   'admin.usage.billingModeToken': 'Token',
   'admin.usage.billingModePerRequest': 'Per request',
   'admin.usage.billingModeImage': 'Image',
@@ -136,7 +136,7 @@ describe('shared UsageTable latency', () => {
   it.each([
     { role: 'admin', showAccountBilling: true, showUpstreamEndpoint: true },
     { role: 'user', showAccountBilling: false, showUpstreamEndpoint: false },
-  ])('shows output speed alongside first-token and total latency for $role records', (options) => {
+  ])('shows colored average TPS alongside first-token and total latency for $role records', (options) => {
     const wrapper = mount(UsageTable, {
       props: {
         showAccountBilling: options.showAccountBilling,
@@ -173,6 +173,13 @@ describe('shared UsageTable latency', () => {
             duration_ms: 1000,
             first_token_ms: 1000,
           },
+          ...[0, 9, 10, 15, 20, 21].map((tps) => ({
+            ...baseImageRow,
+            request_id: `req-tps-${tps}`,
+            output_tokens: tps * 3,
+            duration_ms: 3000,
+            first_token_ms: 2000,
+          })),
         ],
         columns: [{ key: 'latency', label: 'Latency' }],
       },
@@ -189,15 +196,24 @@ describe('shared UsageTable latency', () => {
       },
     })
 
-    const speeds = wrapper.findAll('[data-testid="output-tokens-per-second"]')
-    expect(speeds.map((speed) => speed.text())).toEqual(['50.0 t/s', '33.3 t/s', '-', '-'])
-    expect(speeds[0].attributes('title')).toBe(messages['usage.outputTokensPerSecondHint'])
+    const speeds = wrapper.findAll('[data-testid="average-tps"]')
+    expect(speeds.map((speed) => speed.text())).toEqual([
+      '33.3 t/s', '33.3 t/s', '-', '100.0 t/s',
+      '0.0 t/s', '9.0 t/s', '10.0 t/s', '15.0 t/s', '20.0 t/s', '21.0 t/s',
+    ])
+    const expectedColors = ['emerald', 'emerald', 'gray', 'emerald', 'red', 'red', 'yellow', 'yellow', 'yellow', 'emerald']
+    speeds.forEach((speed, index) => {
+      const color = expectedColors[index]
+      expect(speed.classes()).toContain(`text-${color}-${color === 'gray' ? 400 : 600}`)
+      expect(speed.classes()).toContain(`dark:text-${color}-${color === 'gray' ? 500 : 400}`)
+    })
+    expect(speeds[0].attributes('title')).toBe(messages['usage.averageTpsHint'])
     const firstCell = wrapper.get('[data-testid="latency-cell"]')
     expect(firstCell.text()).toContain('First')
     expect(firstCell.text()).toContain('1.00s')
     expect(firstCell.text()).toContain('Total')
     expect(firstCell.text()).toContain('3.00s')
-    expect(firstCell.text()).toContain('Output')
+    expect(firstCell.text()).toContain('Avg TPS')
     wrapper.unmount()
   })
 })

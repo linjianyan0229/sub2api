@@ -79,7 +79,7 @@ sudo journalctl -u sub2api-ccr-update.service
 在仓库根目录构建。先登录 CCR，再推送版本标签与 `latest`：
 
 ```bash
-VERSION=0.3.49
+VERSION=0.3.5
 IMAGE=ccr.ccs.tencentyun.com/linjianyan/sub2api
 docker build --build-arg VERSION="$(cat backend/cmd/server/VERSION)" --build-arg RELEASE_VERSION="$VERSION" --label "org.opencontainers.image.version=$VERSION" -t "$IMAGE:$VERSION" -t "$IMAGE:latest" .
 docker save -o sub2api-image.tar "$IMAGE:$VERSION" "$IMAGE:latest"
@@ -87,7 +87,7 @@ docker push "$IMAGE:$VERSION"
 docker push "$IMAGE:latest"
 ```
 
-网站发布版本与插件兼容版本分开：`RELEASE_VERSION` 注入网站公开设置、管理员版本接口和命令行版本显示；插件继续使用 `VERSION`（取自 `backend/cmd/server/VERSION`）检查兼容范围。未指定发布版本时，显示回退到 `VERSION`。CCR 工作流自动传入镜像版本作为 `RELEASE_VERSION`；直接编译二进制时使用 `-X main.ReleaseVersion=0.3.49`。离线主机可 `docker load -i sub2api-image.tar` 后启动。更新仍需要主机能够访问 CCR 并拥有拉取权限。
+网站发布版本与插件兼容版本分开：`RELEASE_VERSION` 注入网站公开设置、管理员版本接口和命令行版本显示；插件继续使用 `VERSION`（取自 `backend/cmd/server/VERSION`）检查兼容范围。未指定发布版本时，显示回退到 `VERSION`。CCR 工作流自动传入镜像版本作为 `RELEASE_VERSION`；直接编译二进制时使用 `-X main.ReleaseVersion=0.3.5`。离线主机可 `docker load -i sub2api-image.tar` 后启动。更新仍需要主机能够访问 CCR 并拥有拉取权限。
 
 镜像 `0.3` 包含论坛和共享额度生效方式支持，应用兼容版本仍为 `0.2.9`，兼容现有共享额度插件的版本范围。共享额度的新配置页面由插件 `0.1.3` 提供，已有实例需按插件说明另行升级持久化插件包；更新镜像不会覆盖已安装插件。
 
@@ -110,6 +110,8 @@ docker push "$IMAGE:latest"
 镜像 `0.3.45` 将贡献渠道状态页接入真实监控，展示可用率、延迟时间线及模型详情；贡献者可设置检测模型和 OpenAI 检测协议。主动检测受全站监控模式、状态页开关及渠道可用状态约束，使用关联账号的当前连接和密钥，按模型映射请求上游；已有开启状态展示的渠道会在启动时同步监控配置。贡献渠道的列表与详情沿用分组可见权限，关闭展示后停止检测并保留历史。无新增数据库迁移，继续使用插件 `0.1.4` 及现有外部 PostgreSQL、Redis 配置。
 
 镜像 `0.3.49` 包含此前 `0.3.46` 至 `0.3.48` 的论坛置顶更新：置顶消息通过事件接口同步到全站页头，支持轮播、展开完整内容和移动端紧凑展示；退出或切换账号时清空置顶缓存。管理员和用户用量记录新增输出速度（t/s），以输出 token 数除以扣除首 token 等待后的生成耗时计算，缺少首 token 耗时时使用总耗时，无效数据展示为 `-`。无新增数据库迁移，应用兼容版本仍为 `0.2.9`，继续保留现有共享额度插件及外部 PostgreSQL、Redis 配置。
+
+镜像 `0.3.5` 在 `0.3.49` 基础上将管理员和用户用量记录的输出速度统一为平均 TPS：输出 token 数除以总耗时（秒），不再扣除首 token 等待时间。大于 20 显示绿色，10 至 20（含边界）显示黄色，小于 10 显示红色；缺失或无效数据展示灰色 `-`。该发布按指定标签使用 `0.3.5`，不是 `0.3.50`；CCR 自动更新仍根据 `latest` 的镜像内容变化部署，不按版本号大小排序。无新增数据库迁移，应用兼容版本仍为 `0.2.9`，已有配置、数据和插件保留。
 
 代码仓库：`https://github.com/linjianyan0229/sub2api`。本地 `origin` 和默认推送分支指向自有仓库；`upstream` 仅用于读取原项目更新，已禁用推送。版本直接提交到自有仓库，无需向上游提交合并请求。保留原项目许可证和 Go 模块路径。
 
