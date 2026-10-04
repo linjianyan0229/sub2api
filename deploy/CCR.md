@@ -79,7 +79,7 @@ sudo journalctl -u sub2api-ccr-update.service
 在仓库根目录构建。先登录 CCR，再推送版本标签与 `latest`：
 
 ```bash
-VERSION=0.3.5
+VERSION=0.3.51
 IMAGE=ccr.ccs.tencentyun.com/linjianyan/sub2api
 docker build --build-arg VERSION="$(cat backend/cmd/server/VERSION)" --build-arg RELEASE_VERSION="$VERSION" --label "org.opencontainers.image.version=$VERSION" -t "$IMAGE:$VERSION" -t "$IMAGE:latest" .
 docker save -o sub2api-image.tar "$IMAGE:$VERSION" "$IMAGE:latest"
@@ -87,7 +87,7 @@ docker push "$IMAGE:$VERSION"
 docker push "$IMAGE:latest"
 ```
 
-网站发布版本与插件兼容版本分开：`RELEASE_VERSION` 注入网站公开设置、管理员版本接口和命令行版本显示；插件继续使用 `VERSION`（取自 `backend/cmd/server/VERSION`）检查兼容范围。未指定发布版本时，显示回退到 `VERSION`。CCR 工作流自动传入镜像版本作为 `RELEASE_VERSION`；直接编译二进制时使用 `-X main.ReleaseVersion=0.3.5`。离线主机可 `docker load -i sub2api-image.tar` 后启动。更新仍需要主机能够访问 CCR 并拥有拉取权限。
+网站发布版本与插件兼容版本分开：`RELEASE_VERSION` 注入网站公开设置、管理员版本接口和命令行版本显示；插件继续使用 `VERSION`（取自 `backend/cmd/server/VERSION`）检查兼容范围。未指定发布版本时，显示回退到 `VERSION`。CCR 工作流自动传入镜像版本作为 `RELEASE_VERSION`；直接编译二进制时使用 `-X main.ReleaseVersion=0.3.51`。离线主机可 `docker load -i sub2api-image.tar` 后启动。更新仍需要主机能够访问 CCR 并拥有拉取权限。
 
 镜像 `0.3` 包含论坛和共享额度生效方式支持，应用兼容版本仍为 `0.2.9`，兼容现有共享额度插件的版本范围。共享额度的新配置页面由插件 `0.1.3` 提供，已有实例需按插件说明另行升级持久化插件包；更新镜像不会覆盖已安装插件。
 
@@ -112,6 +112,8 @@ docker push "$IMAGE:latest"
 镜像 `0.3.49` 包含此前 `0.3.46` 至 `0.3.48` 的论坛置顶更新：置顶消息通过事件接口同步到全站页头，支持轮播、展开完整内容和移动端紧凑展示；退出或切换账号时清空置顶缓存。管理员和用户用量记录新增输出速度（t/s），以输出 token 数除以扣除首 token 等待后的生成耗时计算，缺少首 token 耗时时使用总耗时，无效数据展示为 `-`。无新增数据库迁移，应用兼容版本仍为 `0.2.9`，继续保留现有共享额度插件及外部 PostgreSQL、Redis 配置。
 
 镜像 `0.3.5` 在 `0.3.49` 基础上将管理员和用户用量记录的输出速度统一为平均 TPS：输出 token 数除以总耗时（秒），不再扣除首 token 等待时间。大于 20 显示绿色，10 至 20（含边界）显示黄色，小于 10 显示红色；缺失或无效数据展示灰色 `-`。该发布按指定标签使用 `0.3.5`，不是 `0.3.50`；CCR 自动更新仍根据 `latest` 的镜像内容变化部署，不按版本号大小排序。无新增数据库迁移，应用兼容版本仍为 `0.2.9`，已有配置、数据和插件保留。
+
+镜像 `0.3.51` 修复请求结束前删除 API Key 导致计费结算回滚的问题：结算时已删除或不存在的 Key 不再阻断用户余额、订阅用量及上游账号额度扣费，且不更新已删除 Key 的额度和限流计数；真实数据库错误仍使事务失败。请求去重继续防止重复扣费，并新增余额、订阅和账号额度结算的回归测试。无新增数据库迁移，应用兼容版本仍为 `0.2.9`，已有配置、数据和插件保留。
 
 代码仓库：`https://github.com/linjianyan0229/sub2api`。本地 `origin` 和默认推送分支指向自有仓库；`upstream` 仅用于读取原项目更新，已禁用推送。版本直接提交到自有仓库，无需向上游提交合并请求。保留原项目许可证和 Go 模块路径。
 

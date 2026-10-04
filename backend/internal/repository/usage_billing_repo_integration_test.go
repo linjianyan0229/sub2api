@@ -162,6 +162,112 @@ func TestUsageBillingRepositoryApply_RequestFingerprintConflict(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrUsageBillingRequestConflict)
 }
 
+func TestUsageBillingRepositoryApply_DeletedAPIKeyStillSettles(t *testing.T) {
+	for _, billingType := range []string{"balance", "subscription"} {
+		t.Run(billingType, func(t *testing.T) {
+			ctx := context.Background()
+			client := testEntClient(t)
+			repo := NewUsageBillingRepository(client, integrationDB)
+
+			user := mustCreateUser(t, client, &service.User{
+				Email:        "usage-billing-deleted-key-" + uuid.NewString() + "@example.com",
+				PasswordHash: "hash",
+				Balance:      100,
+			})
+			apiKey := mustCreateApiKey(t, client, &service.APIKey{
+				UserID:      user.ID,
+				Key:         "sk-usage-billing-deleted-key-" + uuid.NewString(),
+				Name:        "billing-deleted-key",
+				Quota:       50,
+				RateLimit5h: 50,
+			})
+			account := mustCreateAccount(t, client, &service.Account{
+				Name: "usage-billing-deleted-key-account-" + uuid.NewString(),
+				Type: service.AccountTypeAPIKey,
+				Extra: map[string]any{
+					"quota_limit": 100.0,
+				},
+			})
+			cmd := &service.UsageBillingCommand{
+				RequestID:           uuid.NewString(),
+				APIKeyID:            apiKey.ID,
+				UserID:              user.ID,
+				AccountID:           account.ID,
+				AccountType:         service.AccountTypeAPIKey,
+				APIKeyQuotaCost:     1.25,
+				APIKeyRateLimitCost: 1.25,
+				AccountQuotaCost:    3.5,
+			}
+			expectedBalance := 98.75
+			if billingType == "subscription" {
+				group := mustCreateGroup(t, client, &service.Group{
+					Name:             "usage-billing-deleted-key-group-" + uuid.NewString(),
+					Platform:         service.PlatformAnthropic,
+					SubscriptionType: service.SubscriptionTypeSubscription,
+				})
+				subscription := mustCreateSubscription(t, client, &service.UserSubscription{
+					UserID:  user.ID,
+					GroupID: group.ID,
+				})
+				cmd.SubscriptionID = &subscription.ID
+				cmd.SubscriptionCost = 1.25
+				expectedBalance = 100
+			} else {
+				cmd.BalanceCost = 1.25
+			}
+
+			_, err := integrationDB.ExecContext(ctx, "UPDATE api_keys SET deleted_at = NOW() WHERE id = $1", apiKey.ID)
+			require.NoError(t, err)
+
+			result, err := repo.Apply(ctx, cmd)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.True(t, result.Applied)
+			require.False(t, result.APIKeyQuotaExhausted)
+			require.NotNil(t, result.QuotaState)
+			require.InDelta(t, 3.5, result.QuotaState.TotalUsed, 0.000001)
+
+			repeated, err := repo.Apply(ctx, cmd)
+			require.NoError(t, err)
+			require.NotNil(t, repeated)
+			require.False(t, repeated.Applied)
+
+			var balance float64
+			require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT balance FROM users WHERE id = $1", user.ID).Scan(&balance))
+			require.InDelta(t, expectedBalance, balance, 0.000001)
+			if cmd.SubscriptionID != nil {
+				var dailyUsage, weeklyUsage, monthlyUsage float64
+				require.NoError(t, integrationDB.QueryRowContext(ctx,
+					"SELECT daily_usage_usd, weekly_usage_usd, monthly_usage_usd FROM user_subscriptions WHERE id = $1",
+					*cmd.SubscriptionID,
+				).Scan(&dailyUsage, &weeklyUsage, &monthlyUsage))
+				for _, usage := range []float64{dailyUsage, weeklyUsage, monthlyUsage} {
+					require.InDelta(t, 1.25, usage, 0.000001)
+				}
+			}
+
+			var quotaUsed, usage5h, usage1d, usage7d float64
+			require.NoError(t, integrationDB.QueryRowContext(ctx,
+				"SELECT quota_used, usage_5h, usage_1d, usage_7d FROM api_keys WHERE id = $1", apiKey.ID,
+			).Scan(&quotaUsed, &usage5h, &usage1d, &usage7d))
+			for _, usage := range []float64{quotaUsed, usage5h, usage1d, usage7d} {
+				require.Zero(t, usage)
+			}
+
+			var accountQuotaUsed float64
+			require.NoError(t, integrationDB.QueryRowContext(ctx,
+				"SELECT COALESCE((extra->>'quota_used')::numeric, 0) FROM accounts WHERE id = $1", account.ID,
+			).Scan(&accountQuotaUsed))
+			require.InDelta(t, 3.5, accountQuotaUsed, 0.000001)
+			var dedupCount int
+			require.NoError(t, integrationDB.QueryRowContext(ctx,
+				"SELECT COUNT(*) FROM usage_billing_dedup WHERE request_id = $1 AND api_key_id = $2", cmd.RequestID, apiKey.ID,
+			).Scan(&dedupCount))
+			require.Equal(t, 1, dedupCount)
+		})
+	}
+}
+
 func TestUsageBillingRepositoryApply_UpdatesAccountQuota(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)

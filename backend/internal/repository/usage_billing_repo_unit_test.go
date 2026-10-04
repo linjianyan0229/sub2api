@@ -20,6 +20,8 @@ const (
 	captureBatchImageHoldSQL    = `(?s)UPDATE users\s+SET balance = balance\s+\+ CASE WHEN \$1 > \$2 THEN \$1 - \$2 ELSE 0 END\s+- CASE WHEN \$2 > \$1 THEN \$2 - \$1 ELSE 0 END,\s+frozen_balance = COALESCE\(frozen_balance, 0\) - \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$3 AND deleted_at IS NULL AND COALESCE\(frozen_balance, 0\) >= \$1\s+RETURNING balance, frozen_balance`
 	releaseBatchImageHoldSQL    = `(?s)UPDATE users\s+SET balance = balance \+ \$1,\s+frozen_balance = COALESCE\(frozen_balance, 0\) - \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$2 AND deleted_at IS NULL AND COALESCE\(frozen_balance, 0\) >= \$1\s+RETURNING balance, frozen_balance`
 	userExistsForBillingSQL     = `(?s)SELECT 1\s+FROM users\s+WHERE id = \$1 AND deleted_at IS NULL`
+	apiKeyQuotaIncrementSQL     = `(?s)UPDATE api_keys\s+SET quota_used = quota_used \+ \$1,.*WHERE id = \$2 AND deleted_at IS NULL\s+RETURNING`
+	apiKeyRateLimitIncrementSQL = `(?s)UPDATE api_keys SET\s+usage_5h = .*WHERE id = \$2 AND deleted_at IS NULL`
 )
 
 func TestDeductUsageBillingBalance_UsesSufficientBalanceGuard(t *testing.T) {
@@ -97,6 +99,94 @@ func TestApplyUsageBillingEffects_FlagsBalanceOverdraft(t *testing.T) {
 	require.True(t, result.BalanceOverdrafted)
 	require.NoError(t, tx.Commit())
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestApplyUsageBillingEffects_DeletedAPIKeyStillBillsBalance(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		quotaCost     float64
+		rateLimitCost float64
+	}{
+		{name: "quota only", quotaCost: 10},
+		{name: "rate limit only", rateLimitCost: 10},
+		{name: "quota and rate limit", quotaCost: 10, rateLimitCost: 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer func() { _ = db.Close() }()
+
+			mock.ExpectBegin()
+			tx, err := db.BeginTx(ctx, nil)
+			require.NoError(t, err)
+			mock.ExpectQuery(conditionalBalanceDeductSQL).
+				WithArgs(10.0, int64(42)).
+				WillReturnRows(sqlmock.NewRows([]string{"balance"}).AddRow(90.0))
+			if tc.quotaCost > 0 {
+				mock.ExpectQuery(apiKeyQuotaIncrementSQL).
+					WithArgs(tc.quotaCost, int64(7), service.StatusAPIKeyActive, service.StatusAPIKeyQuotaExhausted).
+					WillReturnError(sql.ErrNoRows)
+			}
+			if tc.rateLimitCost > 0 {
+				mock.ExpectExec(apiKeyRateLimitIncrementSQL).
+					WithArgs(tc.rateLimitCost, int64(7)).
+					WillReturnResult(sqlmock.NewResult(0, 0))
+			}
+			mock.ExpectCommit()
+
+			result := &service.UsageBillingApplyResult{Applied: true}
+			err = (&usageBillingRepository{}).applyUsageBillingEffects(ctx, tx, &service.UsageBillingCommand{
+				UserID:              42,
+				APIKeyID:            7,
+				BalanceCost:         10,
+				APIKeyQuotaCost:     tc.quotaCost,
+				APIKeyRateLimitCost: tc.rateLimitCost,
+			}, result)
+			require.NoError(t, err)
+			require.NotNil(t, result.NewBalance)
+			require.InDelta(t, 90.0, *result.NewBalance, 0.000001)
+			require.False(t, result.APIKeyQuotaExhausted)
+			require.NoError(t, tx.Commit())
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestApplyUsageBillingEffects_APIKeyCounterErrorStillFails(t *testing.T) {
+	for _, counter := range []string{"quota", "rate limit"} {
+		t.Run(counter, func(t *testing.T) {
+			ctx := context.Background()
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer func() { _ = db.Close() }()
+
+			mock.ExpectBegin()
+			tx, err := db.BeginTx(ctx, nil)
+			require.NoError(t, err)
+			mock.ExpectQuery(conditionalBalanceDeductSQL).
+				WithArgs(10.0, int64(42)).
+				WillReturnRows(sqlmock.NewRows([]string{"balance"}).AddRow(90.0))
+			cmd := &service.UsageBillingCommand{UserID: 42, APIKeyID: 7, BalanceCost: 10}
+			if counter == "quota" {
+				cmd.APIKeyQuotaCost = 10
+				mock.ExpectQuery(apiKeyQuotaIncrementSQL).
+					WithArgs(10.0, int64(7), service.StatusAPIKeyActive, service.StatusAPIKeyQuotaExhausted).
+					WillReturnError(sql.ErrConnDone)
+			} else {
+				cmd.APIKeyRateLimitCost = 10
+				mock.ExpectExec(apiKeyRateLimitIncrementSQL).
+					WithArgs(10.0, int64(7)).
+					WillReturnError(sql.ErrConnDone)
+			}
+			mock.ExpectRollback()
+
+			err = (&usageBillingRepository{}).applyUsageBillingEffects(ctx, tx, cmd, &service.UsageBillingApplyResult{Applied: true})
+			require.ErrorIs(t, err, sql.ErrConnDone)
+			require.NoError(t, tx.Rollback())
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
 }
 
 func TestDeductUsageBillingBalance_ReturnsUserNotFoundWhenNoUserUpdated(t *testing.T) {
