@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,12 +28,12 @@ func TestForumEventsPinnedSnapshot(t *testing.T) {
 			if !initial {
 				after = &cursor
 			}
-			now := time.Now()
+			now := time.Now().AddDate(0, 0, -400)
 			mock.ExpectBegin()
-			mock.ExpectQuery(regexp.QuoteMeta("SELECT last_arrival_id,retention_days FROM forum_settings WHERE id=1")).
-				WillReturnRows(sqlmock.NewRows([]string{"last_arrival_id", "retention_days"}).AddRow(cursor, 30))
-			mock.ExpectQuery(regexp.QuoteMeta(forumMessageSelect + `WHERE m.pinned AND ($1=0 OR m.created_at > NOW()-make_interval(days => $1)) ORDER BY m.id DESC LIMIT 3`)).
-				WithArgs(30).
+			mock.ExpectQuery(regexp.QuoteMeta("SELECT last_arrival_id FROM forum_settings WHERE id=1")).
+				WillReturnRows(sqlmock.NewRows([]string{"last_arrival_id"}).AddRow(cursor))
+			mock.ExpectQuery(regexp.QuoteMeta(forumPinnedMessageSelect + `ORDER BY m.id DESC LIMIT 3`)).
+				WithArgs().
 				WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "username", "is_admin", "url", "actual_cost", "content", "rank", "pinned", "created_at"}).
 					AddRow(9, 2, "private@example.com", true, "", 12.5, "<script>plain text</script>", 1, true, now))
 			if !initial {
@@ -49,6 +50,7 @@ func TestForumEventsPinnedSnapshot(t *testing.T) {
 			require.Empty(t, result.Pinned[0].Author.Username)
 			require.True(t, result.Pinned[0].Author.IsAdmin)
 			require.Equal(t, "<script>plain text</script>", result.Pinned[0].Content)
+			require.Equal(t, now, result.Pinned[0].CreatedAt)
 			require.NoError(t, mock.ExpectationsWereMet())
 		})
 	}
@@ -66,9 +68,9 @@ func TestForumEventsPinnedEmptyAndFailure(t *testing.T) {
 			defer db.Close()
 			repo := &forumRepository{db: db}
 			mock.ExpectBegin()
-			mock.ExpectQuery("SELECT last_arrival_id,retention_days").
-				WillReturnRows(sqlmock.NewRows([]string{"last_arrival_id", "retention_days"}).AddRow(0, 0))
-			query := mock.ExpectQuery(regexp.QuoteMeta(forumMessageSelect)).WithArgs(0)
+			mock.ExpectQuery("SELECT last_arrival_id FROM forum_settings").
+				WillReturnRows(sqlmock.NewRows([]string{"last_arrival_id"}).AddRow(0))
+			query := mock.ExpectQuery(regexp.QuoteMeta(forumPinnedMessageSelect)).WithArgs()
 			if fail {
 				query.WillReturnError(errors.New("database unavailable"))
 				mock.ExpectRollback()
@@ -84,6 +86,115 @@ func TestForumEventsPinnedEmptyAndFailure(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, result.Pinned)
 				require.Empty(t, result.Pinned)
+			}
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func expectForumAdminMutation(mock sqlmock.Sqlmock) {
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT muted_until FROM forum_settings WHERE id=1 FOR UPDATE`)).
+		WillReturnRows(sqlmock.NewRows([]string{"muted_until"}).AddRow(nil))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT role,status FROM users WHERE id=$1 AND deleted_at IS NULL FOR SHARE`)).
+		WithArgs(int64(1)).
+		WillReturnRows(sqlmock.NewRows([]string{"role", "status"}).AddRow("admin", "active"))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT clock_timestamp()`)).
+		WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(time.Now()))
+}
+
+func TestForumPinIndependentCopy(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		exists     bool
+		count      int
+		inserted   int64
+		insertErr  bool
+		wantErr    error
+		wantErrMsg string
+	}{
+		{name: "copy_message", inserted: 1},
+		{name: "already_pinned_after_history_cleanup", exists: true},
+		{name: "archived_pins_count_towards_limit", count: 3, wantErrMsg: "FORUM_PIN_LIMIT"},
+		{name: "missing_message", wantErr: service.ErrForumNotFound},
+		{name: "copy_failure_rolls_back", insertErr: true, wantErrMsg: "copy failed"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer db.Close()
+			repo := &forumRepository{db: db}
+			expectForumAdminMutation(mock)
+			mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS(SELECT 1 FROM forum_pinned_messages WHERE id=$1)`)).
+				WithArgs(int64(9)).
+				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(tt.exists))
+			if !tt.exists {
+				mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM forum_pinned_messages`)).
+					WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(tt.count))
+				if tt.count < 3 {
+					insert := mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO forum_pinned_messages(id,user_id,content,rank_at_send,created_at)
+                        SELECT id,user_id,content,rank_at_send,created_at FROM forum_messages WHERE id=$1`)).
+						WithArgs(int64(9))
+					if tt.insertErr {
+						insert.WillReturnError(errors.New("copy failed"))
+					} else {
+						insert.WillReturnResult(sqlmock.NewResult(0, tt.inserted))
+					}
+				}
+			}
+			if tt.wantErr != nil || tt.wantErrMsg != "" {
+				mock.ExpectRollback()
+			} else {
+				mock.ExpectCommit()
+			}
+			err = repo.Pin(context.Background(), 1, 9, true)
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+			} else if tt.wantErrMsg != "" {
+				require.ErrorContains(t, err, tt.wantErrMsg)
+			} else {
+				require.NoError(t, err)
+			}
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestForumUnpinIndependentCopy(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		deleted       int64
+		messageExists bool
+		wantErr       bool
+	}{
+		{name: "unpin_after_history_cleanup", deleted: 1},
+		{name: "already_unpinned_message", messageExists: true},
+		{name: "missing_pin_and_message", wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer db.Close()
+			repo := &forumRepository{db: db}
+			expectForumAdminMutation(mock)
+			mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM forum_pinned_messages WHERE id=$1`)).
+				WithArgs(int64(9)).
+				WillReturnResult(sqlmock.NewResult(0, tt.deleted))
+			if tt.deleted == 0 {
+				mock.ExpectQuery(regexp.QuoteMeta(`SELECT EXISTS(SELECT 1 FROM forum_messages WHERE id=$1)`)).
+					WithArgs(int64(9)).
+					WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(tt.messageExists))
+			}
+			if tt.wantErr {
+				mock.ExpectRollback()
+			} else {
+				mock.ExpectCommit()
+			}
+			err = repo.Pin(context.Background(), 1, 9, false)
+			if tt.wantErr {
+				require.ErrorIs(t, err, service.ErrForumNotFound)
+			} else {
+				require.NoError(t, err)
 			}
 			require.NoError(t, mock.ExpectationsWereMet())
 		})

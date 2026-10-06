@@ -19,11 +19,16 @@ const forumRankSelect = `WITH top AS (SELECT t.user_id,ROW_NUMBER() OVER (ORDER 
     WHERE t.actual_cost>0 OR t.tokens>0 ORDER BY t.actual_cost DESC,t.tokens DESC,t.user_id ASC LIMIT 20)
     SELECT COALESCE((SELECT rank FROM top WHERE user_id=$1),0)`
 
-const forumMessageSelect = `SELECT m.id,COALESCE(u.id,0),COALESCE(u.username,''),COALESCE(u.role='admin',false),COALESCE(a.url,''),COALESCE(t.actual_cost,0),
-    m.content,m.rank_at_send,m.pinned,m.created_at FROM forum_messages m
-    LEFT JOIN users u ON u.id=m.user_id AND u.deleted_at IS NULL
+const forumMessageColumns = `SELECT m.id,COALESCE(u.id,0),COALESCE(u.username,''),COALESCE(u.role='admin',false),COALESCE(a.url,''),COALESCE(t.actual_cost,0),
+    m.content,m.rank_at_send,`
+
+const forumAuthorJoins = ` LEFT JOIN users u ON u.id=m.user_id AND u.deleted_at IS NULL
     LEFT JOIN user_avatars a ON a.user_id=u.id
     LEFT JOIN user_usage_lifetime_totals t ON t.user_id=u.id `
+
+const forumMessageSelect = forumMessageColumns + `EXISTS(SELECT 1 FROM forum_pinned_messages p WHERE p.id=m.id),m.created_at FROM forum_messages m` + forumAuthorJoins
+
+const forumPinnedMessageSelect = forumMessageColumns + `TRUE,m.created_at FROM forum_pinned_messages m` + forumAuthorJoins
 
 func scanForumMessage(row interface{ Scan(...any) error }) (service.ForumMessage, error) {
 	var m service.ForumMessage
@@ -31,8 +36,8 @@ func scanForumMessage(row interface{ Scan(...any) error }) (service.ForumMessage
 	m.Author.Username = service.ForumDisplayName(m.Author.Username)
 	return m, err
 }
-func forumMessages(ctx context.Context, tx *sql.Tx, suffix string, args ...any) ([]service.ForumMessage, error) {
-	rows, err := tx.QueryContext(ctx, forumMessageSelect+suffix, args...)
+func forumMessages(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]service.ForumMessage, error) {
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -47,8 +52,8 @@ func forumMessages(ctx context.Context, tx *sql.Tx, suffix string, args ...any) 
 	}
 	return out, rows.Err()
 }
-func forumPinnedMessages(ctx context.Context, tx *sql.Tx, retentionDays int) ([]service.ForumMessage, error) {
-	return forumMessages(ctx, tx, `WHERE m.pinned AND ($1=0 OR m.created_at > NOW()-make_interval(days => $1)) ORDER BY m.id DESC LIMIT 3`, retentionDays)
+func forumPinnedMessages(ctx context.Context, tx *sql.Tx) ([]service.ForumMessage, error) {
+	return forumMessages(ctx, tx, forumPinnedMessageSelect+`ORDER BY m.id DESC LIMIT 3`)
 }
 func (r *forumRepository) Page(ctx context.Context, user, before int64) (*service.ForumPage, error) {
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
@@ -66,7 +71,7 @@ func (r *forumRepository) Page(ctx context.Context, user, before int64) (*servic
 		return nil, err
 	}
 	visible := ` AND ($2=0 OR m.created_at > NOW()-make_interval(days => $2)) `
-	p.Messages, err = forumMessages(ctx, tx, `WHERE ($1::bigint=0 OR m.id<$1)`+visible+` ORDER BY m.id DESC LIMIT 51`, before, p.Settings.RetentionDays)
+	p.Messages, err = forumMessages(ctx, tx, forumMessageSelect+`WHERE ($1::bigint=0 OR m.id<$1)`+visible+` ORDER BY m.id DESC LIMIT 51`, before, p.Settings.RetentionDays)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +79,7 @@ func (r *forumRepository) Page(ctx context.Context, user, before int64) (*servic
 	if p.HasMore {
 		p.Messages = p.Messages[:50]
 	}
-	p.Pinned, err = forumPinnedMessages(ctx, tx, p.Settings.RetentionDays)
+	p.Pinned, err = forumPinnedMessages(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -171,12 +176,11 @@ func (r *forumRepository) Events(ctx context.Context, after *int64) (*service.Fo
 	}
 	defer tx.Rollback()
 	result := &service.ForumEvents{Arrivals: []service.ForumArrival{}}
-	var retentionDays int
-	if err = tx.QueryRowContext(ctx, `SELECT last_arrival_id,retention_days FROM forum_settings WHERE id=1`).Scan(&result.Cursor, &retentionDays); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT last_arrival_id FROM forum_settings WHERE id=1`).Scan(&result.Cursor); err != nil {
 		return nil, err
 	}
-	// Pins are a current snapshot, independent of the arrival cursor.
-	result.Pinned, err = forumPinnedMessages(ctx, tx, retentionDays)
+	// Pins are independent of both the arrival cursor and chat retention.
+	result.Pinned, err = forumPinnedMessages(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -275,15 +279,35 @@ func (r *forumRepository) Mutes(ctx context.Context, actor int64) ([]service.For
 func (r *forumRepository) Pin(ctx context.Context, actor, id int64, pinned bool) error {
 	return r.mutation(ctx, actor, true, func(tx *sql.Tx, _ time.Time, _ bool, _ *time.Time) error {
 		if pinned {
+			var exists bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM forum_pinned_messages WHERE id=$1)`, id).Scan(&exists); err != nil {
+				return err
+			}
+			if exists {
+				return nil
+			}
 			var count int
-			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM forum_messages WHERE pinned AND id<>$1`, id).Scan(&count); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM forum_pinned_messages`).Scan(&count); err != nil {
 				return err
 			}
 			if count >= 3 {
 				return infraerrors.BadRequest("FORUM_PIN_LIMIT", "最多置顶 3 条内容")
 			}
+			result, err := tx.ExecContext(ctx, `INSERT INTO forum_pinned_messages(id,user_id,content,rank_at_send,created_at)
+                SELECT id,user_id,content,rank_at_send,created_at FROM forum_messages WHERE id=$1`, id)
+			if err != nil {
+				return err
+			}
+			n, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if n == 0 {
+				return service.ErrForumNotFound
+			}
+			return nil
 		}
-		result, err := tx.ExecContext(ctx, `UPDATE forum_messages SET pinned=$2 WHERE id=$1`, id, pinned)
+		result, err := tx.ExecContext(ctx, `DELETE FROM forum_pinned_messages WHERE id=$1`, id)
 		if err != nil {
 			return err
 		}
@@ -292,7 +316,13 @@ func (r *forumRepository) Pin(ctx context.Context, actor, id int64, pinned bool)
 			return err
 		}
 		if n == 0 {
-			return service.ErrForumNotFound
+			var exists bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM forum_messages WHERE id=$1)`, id).Scan(&exists); err != nil {
+				return err
+			}
+			if !exists {
+				return service.ErrForumNotFound
+			}
 		}
 		return nil
 	})

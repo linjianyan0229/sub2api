@@ -25,8 +25,11 @@
         v-if="user && forumStore.pinned.length"
         class="min-w-0 flex-1"
         :messages="forumStore.pinned"
+        :manageable="authStore.isAdmin"
+        :busy="unpinning"
         compact
         data-global-forum-pins
+        @unpin="unpinForumMessage"
       />
 
       <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown -->
@@ -284,6 +287,7 @@ import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMi
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
 import ForumPinnedBar from '@/components/forum/ForumPinnedBar.vue'
 import { useForumStore } from '@/stores/forum'
+import { forumAPI } from '@/api/forum'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
@@ -297,6 +301,7 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const adminSettingsStore = useAdminSettingsStore()
 const forumStore = useForumStore()
+const unpinning = ref(false)
 
 const user = computed(() => authStore.user)
 const dropdownOpen = ref(false)
@@ -374,6 +379,24 @@ function toggleDropdown() {
 
 function closeDropdown() {
   dropdownOpen.value = false
+}
+
+async function unpinForumMessage(id: number) {
+  if (!authStore.isAdmin || unpinning.value) return
+  const userId = user.value?.id
+  unpinning.value = true
+  try {
+    await forumAPI.pin(id, false)
+    if (user.value?.id !== userId) return
+    forumStore.setPinned(forumStore.pinned.filter(message => message.id !== id))
+    appStore.showSuccess(t('common.saved'))
+  } catch (error) {
+    if (user.value?.id === userId) {
+      appStore.showError((error as { message?: string })?.message || t('forum.failed'))
+    }
+  } finally {
+    unpinning.value = false
+  }
 }
 
 async function handleLogout() {

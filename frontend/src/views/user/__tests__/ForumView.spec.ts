@@ -102,16 +102,22 @@ describe('论坛讨论', () => {
     expect(wrapper.text()).toContain('管理员')
     wrapper.unmount()
   })
-  it('管理员清空必须先确认，清空调用不携带用户可控身份', async () => {
+  it('管理员清空必须先确认，清空后仍同步独立置顶内容', async () => {
     mocks.auth.isAdmin = true
+    const result = snapshot()
+    const pinned = [{ ...result.messages[0], pinned: true }]
+    mocks.page.mockResolvedValue({ ...result, messages: pinned, pinned })
     const wrapper = mount(ForumView)
     await flushPromises()
     await wrapper.get('.forum-manage-button').trigger('click')
     const clear = wrapper.findAll('button').find(button => button.text() === 'forum.clear')!
     await clear.trigger('click')
     expect(mocks.clear).not.toHaveBeenCalled()
+    mocks.page.mockResolvedValue({ ...result, messages: [], pinned })
     await wrapper.get('[data-confirm]').trigger('click'); await flushPromises()
     expect(mocks.clear).toHaveBeenCalledOnce()
+    expect(wrapper.find('.forum-message').exists()).toBe(false)
+    expect(useForumStore().pinned).toEqual(pinned)
     wrapper.unmount()
   })
 })

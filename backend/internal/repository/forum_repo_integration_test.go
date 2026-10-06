@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	dbmigrations "github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
@@ -29,7 +30,9 @@ func TestForumPermissionsLifecycleAndEvents(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		for _, id := range ids {
-			_, err := integrationDB.ExecContext(ctx, `DELETE FROM forum_messages WHERE user_id=$1`, id)
+			_, err := integrationDB.ExecContext(ctx, `DELETE FROM forum_pinned_messages WHERE user_id=$1`, id)
+			require.NoError(t, err)
+			_, err = integrationDB.ExecContext(ctx, `DELETE FROM forum_messages WHERE user_id=$1`, id)
 			require.NoError(t, err)
 			_, err = integrationDB.ExecContext(ctx, `DELETE FROM users WHERE id=$1`, id)
 			require.NoError(t, err)
@@ -92,10 +95,14 @@ func TestForumPermissionsLifecycleAndEvents(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, page.Pinned, 1)
 	require.True(t, page.Pinned[0].Author.IsAdmin)
+	require.True(t, page.Messages[0].Pinned)
 	globalPins, err := repo.Events(ctx, nil)
 	require.NoError(t, err)
 	require.Equal(t, page.Pinned, globalPins.Pinned)
 	require.NoError(t, repo.Pin(ctx, admin, adminMessage.ID, false))
+	page, err = repo.Page(ctx, user, 0)
+	require.NoError(t, err)
+	require.False(t, page.Messages[0].Pinned)
 	globalPins, err = repo.Events(ctx, &globalPins.Cursor)
 	require.NoError(t, err)
 	require.Empty(t, globalPins.Pinned)
@@ -116,6 +123,8 @@ func TestForumPermissionsLifecycleAndEvents(t *testing.T) {
 	require.NoError(t, err)
 	_, err = repo.Create(ctx, ids[3], "禁言到期")
 	require.NoError(t, err)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `UPDATE forum_messages
+        SET created_at=NOW()-INTERVAL '8 days' WHERE id=$1 RETURNING created_at`, m.ID).Scan(&m.CreatedAt))
 	require.NoError(t, repo.Pin(ctx, admin, m.ID, true))
 	page, err = repo.Page(ctx, user, 0)
 	require.NoError(t, err)
@@ -125,16 +134,31 @@ func TestForumPermissionsLifecycleAndEvents(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, older.Messages)
 
-	// 保留期包含置顶；清空不会重置事件游标、用量或禁言记录。
-	_, err = integrationDB.ExecContext(ctx, `UPDATE forum_messages SET created_at=NOW()-INTERVAL '8 days' WHERE id=$1`, m.ID)
-	require.NoError(t, err)
+	// History expires normally, but the pinned copy survives both hiding and deletion.
 	globalPins, err = repo.Events(ctx, nil)
 	require.NoError(t, err)
-	require.Empty(t, globalPins.Pinned)
-	require.NoError(t, repo.Cleanup(ctx))
+	require.Len(t, globalPins.Pinned, 1)
+	require.Equal(t, m.ID, globalPins.Pinned[0].ID)
 	page, err = repo.Page(ctx, user, 0)
 	require.NoError(t, err)
-	require.Empty(t, page.Pinned)
+	for _, message := range page.Messages {
+		require.NotEqual(t, m.ID, message.ID)
+	}
+	require.Equal(t, globalPins.Pinned, page.Pinned)
+	require.NoError(t, repo.Cleanup(ctx))
+	var count int
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM forum_messages WHERE id=$1`, m.ID).Scan(&count))
+	require.Zero(t, count)
+	page, err = repo.Page(ctx, user, 0)
+	require.NoError(t, err)
+	require.Equal(t, globalPins.Pinned, page.Pinned)
+	require.Equal(t, m.Content, page.Pinned[0].Content)
+	require.Equal(t, m.Rank, page.Pinned[0].Rank)
+	require.Equal(t, m.CreatedAt, page.Pinned[0].CreatedAt)
+	require.Equal(t, m.Author, page.Pinned[0].Author)
+	require.NoError(t, repo.Pin(ctx, admin, m.ID, true))
+	// Also clear a pin whose original message has not expired.
+	require.NoError(t, repo.Pin(ctx, admin, adminMessage.ID, true))
 	require.NoError(t, repo.Mute(ctx, admin, ids[4], 10))
 	beforeClear, err := repo.Events(ctx, nil)
 	require.NoError(t, err)
@@ -142,11 +166,20 @@ func TestForumPermissionsLifecycleAndEvents(t *testing.T) {
 	page, err = repo.Page(ctx, user, 0)
 	require.NoError(t, err)
 	require.Empty(t, page.Messages)
+	require.Len(t, page.Pinned, 2)
 	afterClear, err := repo.Events(ctx, &beforeClear.Cursor)
 	require.NoError(t, err)
 	require.Empty(t, afterClear.Arrivals)
-	require.Empty(t, afterClear.Pinned)
+	require.Equal(t, page.Pinned, afterClear.Pinned)
 	require.Equal(t, beforeClear.Cursor, afterClear.Cursor)
+	for _, pin := range afterClear.Pinned {
+		require.NoError(t, repo.Pin(ctx, admin, pin.ID, false))
+	}
+	unpinned, err := repo.Page(ctx, user, 0)
+	require.NoError(t, err)
+	require.Empty(t, unpinned.Pinned)
+	require.Empty(t, unpinned.Messages)
+	require.ErrorIs(t, repo.Pin(ctx, admin, m.ID, true), service.ErrForumNotFound)
 	_, err = repo.Create(ctx, ids[4], "清空不解除禁言")
 	require.ErrorIs(t, err, service.ErrForumMuted)
 	var total float64
@@ -199,13 +232,60 @@ func TestForumPermissionsLifecycleAndEvents(t *testing.T) {
 		}
 	}
 	require.Equal(t, 3, success)
+	// Cleared pins still occupy the limit, and unpinning releases a slot.
+	pinnedPage, err := repo.Page(ctx, user, 0)
+	require.NoError(t, err)
+	require.Len(t, pinnedPage.Pinned, 3)
+	require.NoError(t, repo.Clear(ctx, admin))
+	replacement, err := repo.Create(ctx, ids[10], "Replacement pin")
+	require.NoError(t, err)
+	require.ErrorContains(t, repo.Pin(ctx, admin, replacement.ID, true), "FORUM_PIN_LIMIT")
+	require.NoError(t, repo.Pin(ctx, admin, pinnedPage.Pinned[0].ID, true))
+	require.NoError(t, repo.Pin(ctx, admin, pinnedPage.Pinned[0].ID, false))
+	require.NoError(t, repo.Pin(ctx, admin, replacement.ID, true))
 	require.NoError(t, repo.UpdateSettings(ctx, admin, nil, &zero))
-	_, err = integrationDB.ExecContext(ctx, `UPDATE forum_messages SET created_at=NOW()-INTERVAL '400 days' WHERE id=$1`, next.ID)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE forum_messages SET created_at=NOW()-INTERVAL '400 days' WHERE id=$1`, replacement.ID)
 	require.NoError(t, err)
 	require.NoError(t, repo.Cleanup(ctx))
-	var count int
-	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM forum_messages WHERE id=$1`, next.ID).Scan(&count))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM forum_messages WHERE id=$1`, replacement.ID).Scan(&count))
 	require.Equal(t, 1, count)
+}
+
+func TestForumPinnedMessagesMigration(t *testing.T) {
+	ctx := context.Background()
+	tx := testTx(t)
+	_, err := tx.ExecContext(ctx, `ALTER TABLE forum_messages ADD COLUMN pinned BOOLEAN NOT NULL DEFAULT FALSE`)
+	require.NoError(t, err)
+	var pinnedID, plainID int64
+	require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO forum_messages(content,rank_at_send,created_at,pinned)
+        VALUES('Legacy pin',2,NOW()-INTERVAL '400 days',TRUE) RETURNING id`).Scan(&pinnedID))
+	require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO forum_messages(content) VALUES('Not pinned') RETURNING id`).Scan(&plainID))
+	migration, err := dbmigrations.FS.ReadFile("250_forum_pinned_messages.sql")
+	require.NoError(t, err)
+	for i := 0; i < 2; i++ {
+		_, err = tx.ExecContext(ctx, string(migration))
+		require.NoError(t, err)
+		var matches bool
+		require.NoError(t, tx.QueryRowContext(ctx, `SELECT p.content=m.content AND p.rank_at_send=m.rank_at_send
+            AND p.created_at=m.created_at AND p.user_id IS NOT DISTINCT FROM m.user_id
+            FROM forum_pinned_messages p JOIN forum_messages m ON m.id=p.id WHERE p.id=$1`, pinnedID).Scan(&matches))
+		require.True(t, matches)
+		var count int
+		require.NoError(t, tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM forum_pinned_messages WHERE id=$1`, plainID).Scan(&count))
+		require.Zero(t, count)
+	}
+	_, err = tx.ExecContext(ctx, `DELETE FROM forum_messages WHERE id=$1`, pinnedID)
+	require.NoError(t, err)
+	var content string
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT content FROM forum_pinned_messages WHERE id=$1`, pinnedID).Scan(&content))
+	require.Equal(t, "Legacy pin", content)
+	_, err = tx.ExecContext(ctx, `DELETE FROM forum_pinned_messages WHERE id=$1`, pinnedID)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, string(migration))
+	require.NoError(t, err)
+	var count int
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM forum_pinned_messages WHERE id=$1`, pinnedID).Scan(&count))
+	require.Zero(t, count)
 }
 
 func TestForumArrivalsDeduplicateSessions(t *testing.T) {

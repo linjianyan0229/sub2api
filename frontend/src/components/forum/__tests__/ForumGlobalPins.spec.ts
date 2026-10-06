@@ -8,6 +8,8 @@ import AppHeader from '@/components/layout/AppHeader.vue'
 
 const auth = reactive({ isAuthenticated: true, isAdmin: false, isSharedQuota: false, user: { id: 1 } as { id: number } | null })
 const route = reactive({ path: '/dashboard', fullPath: '/dashboard', meta: {} })
+const mocks = vi.hoisted(() => ({ pin: vi.fn(), success: vi.fn(), error: vi.fn() }))
+vi.mock('@/api/forum', () => ({ forumAPI: { pin: mocks.pin } }))
 vi.mock('vue-router', () => ({
   RouterView: { template: '<div><AppHeader /><main data-route-page>Page content</main></div>' },
   useRoute: () => route,
@@ -15,17 +17,17 @@ vi.mock('vue-router', () => ({
 }))
 vi.mock('@/stores', () => ({
   useAuthStore: () => auth,
-  useAppStore: () => ({ docUrl: '', contactInfo: '', fetchPublicSettings: vi.fn().mockResolvedValue(undefined) }),
+  useAppStore: () => ({ docUrl: '', contactInfo: '', fetchPublicSettings: vi.fn().mockResolvedValue(undefined), showSuccess: mocks.success, showError: mocks.error }),
   useSubscriptionStore: () => ({ clear: vi.fn(), fetchActiveSubscriptions: vi.fn().mockResolvedValue(undefined), startPolling: vi.fn() }),
   useAnnouncementStore: () => ({ fetchAnnouncements: vi.fn(), reset: vi.fn() }),
-  useAdminSettingsStore: () => ({}),
+  useAdminSettingsStore: () => ({ customMenuItems: [] }),
 }))
 vi.mock('@/api/setup', () => ({ getSetupStatus: vi.fn().mockResolvedValue({ needs_setup: false }) }))
 vi.mock('@/utils/featureFlags', () => ({ FeatureFlags: {}, isFeatureFlagEnabled: () => false }))
 vi.mock('@/utils/siteBillingMode', () => ({ resolveSiteBillingMode: () => 'balance' }))
 vi.mock('@/utils/branding', () => ({ updateFavicon: vi.fn() }))
 vi.mock('@/router/title', () => ({ resolveRouteDocumentTitle: () => 'Sub2API', resolveRouteMetaKeys: () => ({}) }))
-vi.mock('@/stores/adminSettings', () => ({ useAdminSettingsStore: () => ({}) }))
+vi.mock('@/stores/adminSettings', () => ({ useAdminSettingsStore: () => ({ customMenuItems: [] }) }))
 vi.mock('vue-i18n', async (importOriginal) => ({ ...await importOriginal<typeof import('vue-i18n')>(), useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/components/common/Toast.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/common/NavigationProgress.vue', () => ({ default: { template: '<div />' } }))
@@ -49,9 +51,12 @@ function render() {
 }
 beforeEach(() => {
   vi.useFakeTimers()
+  vi.clearAllMocks()
+  mocks.pin.mockReset().mockResolvedValue(undefined)
   setActivePinia(createPinia())
   auth.user = { id: 1 }
   auth.isAuthenticated = true
+  auth.isAdmin = false
 })
 afterEach(() => { wrapper?.unmount(); vi.useRealTimers() })
 
@@ -84,11 +89,71 @@ describe('Global forum pins', () => {
     expect(banner.find('[data-pin-pause]').exists()).toBe(false)
     await banner.get('.pin-open').trigger('click')
     expect(banner.findAll('[data-pin-detail-id]')).toHaveLength(3)
+    expect(banner.find('.pin-unpin').exists()).toBe(false)
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
     await banner.get('.pin-open').trigger('click')
     expect(banner.find('[data-pin-detail]').exists()).toBe(false)
     await wrapper.get('[aria-label="common.userMenu"]').trigger('click')
     expect(wrapper.find('[data-mobile-header-extras]').exists()).toBe(true)
+  })
+  it('lets admins unpin archived messages from the header without loading chat history', async () => {
+    auth.isAdmin = true
+    wrapper = render()
+    await flushPromises()
+    useForumStore().setPinned(pins)
+    await flushPromises()
+    await wrapper.get('.pin-open').trigger('click')
+    let finish!: () => void
+    mocks.pin.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve }))
+    await wrapper.get('[data-pin-detail-id="2"] .pin-unpin').trigger('click')
+    expect(mocks.pin).toHaveBeenCalledOnce()
+    expect(mocks.pin).toHaveBeenCalledWith(2, false)
+    expect(wrapper.findAll('.pin-unpin').every(button => button.attributes('disabled') !== undefined)).toBe(true)
+    expect(useForumStore().pinned).toHaveLength(3)
+    finish()
+    await flushPromises()
+    expect(useForumStore().pinned.map(pin => pin.id)).toEqual([1, 3])
+    expect(wrapper.find('[data-pin-detail-id="2"]').exists()).toBe(false)
+    expect(mocks.success).toHaveBeenCalledWith('common.saved')
+    await wrapper.get('[data-pin-detail-id="1"] .pin-unpin').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-pin-detail-id="3"] .pin-unpin').trigger('click')
+    await flushPromises()
+    expect(useForumStore().pinned).toEqual([])
+    expect(wrapper.find('[data-global-forum-pins]').exists()).toBe(false)
+  })
+  it('keeps the pinned copy visible when unpinning fails', async () => {
+    auth.isAdmin = true
+    mocks.pin.mockRejectedValueOnce(new Error('Unpin failed'))
+    wrapper = render()
+    await flushPromises()
+    useForumStore().setPinned(pins)
+    await flushPromises()
+    await wrapper.get('.pin-open').trigger('click')
+    await wrapper.get('.pin-unpin').trigger('click')
+    await flushPromises()
+    expect(useForumStore().pinned).toEqual(pins)
+    expect(mocks.error).toHaveBeenCalledWith('Unpin failed')
+    expect(mocks.success).not.toHaveBeenCalled()
+    expect(wrapper.get('.pin-unpin').attributes('disabled')).toBeUndefined()
+  })
+  it('does not apply an old unpin response to another account', async () => {
+    auth.isAdmin = true
+    let finish!: () => void
+    mocks.pin.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve }))
+    wrapper = render()
+    await flushPromises()
+    useForumStore().setPinned(pins)
+    await flushPromises()
+    await wrapper.get('.pin-open').trigger('click')
+    await wrapper.get('.pin-unpin').trigger('click')
+    auth.user = { id: 2 }
+    await flushPromises()
+    useForumStore().setPinned(pins)
+    finish()
+    await flushPromises()
+    expect(useForumStore().pinned).toEqual(pins)
+    expect(mocks.success).not.toHaveBeenCalled()
   })
   it('clears old pins on account changes and hides them on logout', async () => {
     wrapper = render()
