@@ -327,6 +327,34 @@ func (r *forumRepository) Pin(ctx context.Context, actor, id int64, pinned bool)
 		return nil
 	})
 }
+func (r *forumRepository) Recall(ctx context.Context, actor, id int64) error {
+	return r.mutation(ctx, actor, false, func(tx *sql.Tx, now time.Time, admin bool, _ *time.Time) error {
+		var author sql.NullInt64
+		var createdAt time.Time
+		// Pins can outlive chat history; recall must remove both under the mutation lock.
+		err := tx.QueryRowContext(ctx, `SELECT user_id,created_at FROM forum_messages WHERE id=$1
+            UNION ALL SELECT user_id,created_at FROM forum_pinned_messages WHERE id=$1 LIMIT 1`, id).Scan(&author, &createdAt)
+		if errors.Is(err, sql.ErrNoRows) {
+			return service.ErrForumNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if !admin {
+			if !author.Valid || author.Int64 != actor {
+				return service.ErrForumRecallForbidden
+			}
+			if !now.Before(createdAt.Add(time.Minute)) {
+				return service.ErrForumRecallExpired
+			}
+		}
+		if _, err = tx.ExecContext(ctx, `DELETE FROM forum_pinned_messages WHERE id=$1`, id); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `DELETE FROM forum_messages WHERE id=$1`, id)
+		return err
+	})
+}
 func (r *forumRepository) Clear(ctx context.Context, actor int64) error {
 	return r.mutation(ctx, actor, true, func(tx *sql.Tx, _ time.Time, _ bool, _ *time.Time) error {
 		_, err := tx.ExecContext(ctx, `DELETE FROM forum_messages`)

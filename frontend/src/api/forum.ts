@@ -42,6 +42,7 @@ export const forumAPI = {
   async send(content: string) {
     return (await apiClient.post<ForumMessage>('/forum/messages', { content })).data
   },
+  async recall(id: number) { await apiClient.delete(`/forum/messages/${id}`) },
   async events(after?: number, signal?: AbortSignal) {
     return (await apiClient.get<ForumEvents>('/forum/events', { params: { after }, signal })).data
   },

@@ -26,10 +26,11 @@
         class="min-w-0 flex-1"
         :messages="forumStore.pinned"
         :manageable="authStore.isAdmin"
-        :busy="unpinning"
+        :busy="updatingForumMessage"
         compact
         data-global-forum-pins
-        @unpin="unpinForumMessage"
+        @unpin="updateForumMessage($event, false)"
+        @recall="updateForumMessage($event, true)"
       />
 
       <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown -->
@@ -301,7 +302,7 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const adminSettingsStore = useAdminSettingsStore()
 const forumStore = useForumStore()
-const unpinning = ref(false)
+const updatingForumMessage = ref(false)
 
 const user = computed(() => authStore.user)
 const dropdownOpen = ref(false)
@@ -381,21 +382,23 @@ function closeDropdown() {
   dropdownOpen.value = false
 }
 
-async function unpinForumMessage(id: number) {
-  if (!authStore.isAdmin || unpinning.value) return
+async function updateForumMessage(id: number, recall: boolean) {
+  if (!authStore.isAdmin || updatingForumMessage.value) return
   const userId = user.value?.id
-  unpinning.value = true
+  updatingForumMessage.value = true
   try {
-    await forumAPI.pin(id, false)
+    if (recall) await forumAPI.recall(id)
+    else await forumAPI.pin(id, false)
     if (user.value?.id !== userId) return
-    forumStore.setPinned(forumStore.pinned.filter(message => message.id !== id))
-    appStore.showSuccess(t('common.saved'))
+    if (recall) forumStore.removeMessage(id)
+    else forumStore.setPinned(forumStore.pinned.filter(message => message.id !== id))
+    appStore.showSuccess(t(recall ? 'forum.recalled' : 'common.saved'))
   } catch (error) {
     if (user.value?.id === userId) {
       appStore.showError((error as { message?: string })?.message || t('forum.failed'))
     }
   } finally {
-    unpinning.value = false
+    updatingForumMessage.value = false
   }
 }
 

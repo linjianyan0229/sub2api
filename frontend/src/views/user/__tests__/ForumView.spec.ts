@@ -5,7 +5,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useForumStore } from '@/stores/forum'
 import ForumView from '../ForumView.vue'
 
-const mocks = vi.hoisted(() => ({ page: vi.fn(), send: vi.fn(), pin: vi.fn(), mute: vi.fn(), mutes: vi.fn(), settings: vi.fn(), clear: vi.fn(), success: vi.fn(), error: vi.fn(), auth: { isAdmin: false, user: { id: 1 } } }))
+const mocks = vi.hoisted(() => ({ page: vi.fn(), send: vi.fn(), pin: vi.fn(), recall: vi.fn(), mute: vi.fn(), mutes: vi.fn(), settings: vi.fn(), clear: vi.fn(), success: vi.fn(), error: vi.fn(), auth: { isAdmin: false, user: { id: 1 } } }))
 vi.mock('@/api/forum', () => ({ forumAPI: mocks }))
 vi.mock('@/stores', () => ({ useAuthStore: () => mocks.auth, useAppStore: () => ({ showSuccess: mocks.success, showError: mocks.error }) }))
 vi.mock('vue-i18n', async (importOriginal) => ({ ...await importOriginal<typeof import('vue-i18n')>(), useI18n: () => ({ t: (key: string) => key, locale: ref('zh-CN') }) }))
@@ -20,10 +20,103 @@ function snapshot(muted: string | null = null) {
     pinned: [], settings: { muted_until: muted, retention_days: 30 }, muted_until: null, has_more: false
   }
 }
-beforeEach(() => { setActivePinia(createPinia()); vi.useFakeTimers(); vi.clearAllMocks(); mocks.auth.isAdmin = false; mocks.page.mockResolvedValue(snapshot()); mocks.mutes.mockResolvedValue([]) })
+beforeEach(() => { setActivePinia(createPinia()); vi.useFakeTimers(); vi.clearAllMocks(); mocks.auth.isAdmin = false; mocks.auth.user = { id: 1 }; mocks.recall.mockReset().mockResolvedValue(undefined); mocks.page.mockResolvedValue(snapshot()); mocks.mutes.mockResolvedValue([]) })
 afterEach(() => { vi.useRealTimers() })
 
 describe('论坛讨论', () => {
+  it('only offers recall for the current user before the one-minute deadline', async () => {
+    const result = snapshot(new Date(Date.now() + 60000).toISOString())
+    const own = { ...result.messages[0], author: { ...result.messages[0].author, user_id: 1 } }
+    const messages = [
+      { ...own, id: 4, created_at: new Date(Date.now() - 59000).toISOString() },
+      { ...own, id: 3, created_at: new Date(Date.now() - 60000).toISOString() },
+      { ...own, id: 2, created_at: new Date(Date.now() - 61000).toISOString() },
+      result.messages[0],
+    ]
+    mocks.page.mockResolvedValue({ ...result, messages })
+    const wrapper = mount(ForumView)
+    await flushPromises()
+    expect(wrapper.findAll('[data-recall]')).toHaveLength(1)
+    expect(wrapper.get('[data-message-id="4"] [data-recall]').attributes('disabled')).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.find('[data-recall]').exists()).toBe(false)
+    expect(mocks.recall).not.toHaveBeenCalled()
+    wrapper.unmount()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+  it('allows admins to recall old messages from any author', async () => {
+    mocks.auth.isAdmin = true
+    const result = snapshot()
+    const old = { ...result.messages[0], created_at: '2020-01-01T00:00:00Z' }
+    mocks.page.mockResolvedValue({ ...result, messages: [old, { ...old, id: 2, author: { ...old.author, user_id: 1 } }, { ...old, id: 3, author: { ...old.author, user_id: 0 } }] })
+    const wrapper = mount(ForumView)
+    await flushPromises()
+    expect(wrapper.findAll('[data-recall]')).toHaveLength(3)
+    await wrapper.get('[data-message-id="1"] [data-recall]').trigger('click')
+    await flushPromises()
+    expect(mocks.recall).toHaveBeenCalledWith(1)
+    expect(wrapper.find('[data-message-id="1"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+  it('removes recalled messages and pinned copies even if a stale poll finishes later', async () => {
+    const result = snapshot()
+    const own = { ...result.messages[0], pinned: true, author: { ...result.messages[0].author, user_id: 1 } }
+    const stale = { ...result, messages: [own], pinned: [own] }
+    mocks.page.mockResolvedValue(stale)
+    const wrapper = mount(ForumView)
+    await flushPromises()
+    let finishPoll!: (value: typeof stale) => void
+    mocks.page.mockImplementationOnce(() => new Promise(resolve => { finishPoll = resolve }))
+    await vi.advanceTimersByTimeAsync(5000)
+    let finishRecall!: () => void
+    mocks.recall.mockImplementationOnce(() => new Promise<void>(resolve => { finishRecall = resolve }))
+    await wrapper.get('[data-recall]').trigger('click')
+    expect(wrapper.get('[data-recall]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-recall]').trigger('click')
+    expect(mocks.recall).toHaveBeenCalledOnce()
+    finishRecall()
+    await flushPromises()
+    expect(wrapper.find('[data-message-id="1"]').exists()).toBe(false)
+    expect(useForumStore().pinned).toEqual([])
+    finishPoll(stale)
+    await flushPromises()
+    expect(wrapper.find('[data-message-id="1"]').exists()).toBe(false)
+    expect(useForumStore().pinned).toEqual([])
+    expect(mocks.success).toHaveBeenCalledWith('forum.recalled')
+    wrapper.unmount()
+  })
+  it('keeps the message and pin when recall fails and shows the server error', async () => {
+    const result = snapshot()
+    const own = { ...result.messages[0], pinned: true, author: { ...result.messages[0].author, user_id: 1 } }
+    mocks.page.mockResolvedValue({ ...result, messages: [own], pinned: [own] })
+    mocks.recall.mockRejectedValueOnce(new Error('FORUM_RECALL_EXPIRED'))
+    const wrapper = mount(ForumView)
+    await flushPromises()
+    await wrapper.get('[data-recall]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-message-id="1"]').exists()).toBe(true)
+    expect(useForumStore().pinned).toEqual([own])
+    expect(mocks.error).toHaveBeenCalledWith('FORUM_RECALL_EXPIRED')
+    expect(mocks.success).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-recall]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+  it('does not apply a recall response after switching accounts', async () => {
+    const result = snapshot()
+    const own = { ...result.messages[0], author: { ...result.messages[0].author, user_id: 1 } }
+    mocks.page.mockResolvedValue({ ...result, messages: [own] })
+    let finish!: () => void
+    mocks.recall.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve }))
+    const wrapper = mount(ForumView)
+    await flushPromises()
+    await wrapper.get('[data-recall]').trigger('click')
+    mocks.auth.user = { id: 2 }
+    finish()
+    await flushPromises()
+    expect(useForumStore().recalledIds.size).toBe(0)
+    expect(mocks.success).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
   it('自己的消息使用右侧布局，其他消息使用左侧布局并保持时间顺序', async () => {
     const result = snapshot()
     const other = result.messages[0]

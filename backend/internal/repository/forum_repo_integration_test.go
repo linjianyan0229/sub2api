@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	dbmigrations "github.com/Wei-Shaw/sub2api/migrations"
@@ -286,6 +287,106 @@ func TestForumPinnedMessagesMigration(t *testing.T) {
 	var count int
 	require.NoError(t, tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM forum_pinned_messages WHERE id=$1`, pinnedID).Scan(&count))
 	require.Zero(t, count)
+}
+
+func TestForumRecallLifecycle(t *testing.T) {
+	ctx := context.Background()
+	repo := &forumRepository{db: integrationDB}
+	users := newUserRepositoryWithSQL(integrationEntClient, integrationDB)
+	ids := []int64{}
+	for _, role := range []string{"admin", "user", "user"} {
+		u := &service.User{Email: uuid.NewString() + "@forum.test", Username: uuid.NewString(), PasswordHash: "hash", Role: role, Status: "active", Concurrency: 5}
+		require.NoError(t, users.Create(ctx, u))
+		ids = append(ids, u.ID)
+	}
+	t.Cleanup(func() {
+		for _, id := range ids {
+			_, err := integrationDB.ExecContext(ctx, `DELETE FROM forum_pinned_messages WHERE user_id=$1`, id)
+			require.NoError(t, err)
+			_, err = integrationDB.ExecContext(ctx, `DELETE FROM forum_messages WHERE user_id=$1`, id)
+			require.NoError(t, err)
+			_, err = integrationDB.ExecContext(ctx, `DELETE FROM users WHERE id=$1`, id)
+			require.NoError(t, err)
+		}
+		_, err := integrationDB.ExecContext(ctx, `UPDATE forum_settings SET muted_until=NULL WHERE id=1`)
+		require.NoError(t, err)
+	})
+	admin, user, other := ids[0], ids[1], ids[2]
+	message, err := repo.Create(ctx, user, "Recall me")
+	require.NoError(t, err)
+	require.NoError(t, repo.Pin(ctx, admin, message.ID, true))
+	require.ErrorIs(t, repo.Recall(ctx, other, message.ID), service.ErrForumRecallForbidden)
+	minutes := 10
+	require.NoError(t, repo.Mute(ctx, admin, user, minutes))
+	require.NoError(t, repo.UpdateSettings(ctx, admin, &minutes, nil))
+	require.NoError(t, repo.Recall(ctx, user, message.ID))
+	assertGone := func(id int64) {
+		t.Helper()
+		var count int
+		require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT
+            (SELECT COUNT(*) FROM forum_messages WHERE id=$1) +
+            (SELECT COUNT(*) FROM forum_pinned_messages WHERE id=$1)`, id).Scan(&count))
+		require.Zero(t, count)
+		page, err := repo.Page(ctx, user, 0)
+		require.NoError(t, err)
+		for _, msg := range append(page.Messages, page.Pinned...) {
+			require.NotEqual(t, id, msg.ID)
+		}
+		events, err := repo.Events(ctx, nil)
+		require.NoError(t, err)
+		for _, pin := range events.Pinned {
+			require.NotEqual(t, id, pin.ID)
+		}
+	}
+	assertGone(message.ID)
+	require.ErrorIs(t, repo.Recall(ctx, user, message.ID), service.ErrForumNotFound)
+	var lastMessage int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT last_message_id FROM forum_settings WHERE id=1`).Scan(&lastMessage))
+	require.Equal(t, message.ID, lastMessage)
+	zero := 0
+	require.NoError(t, repo.Mute(ctx, admin, user, zero))
+	require.NoError(t, repo.UpdateSettings(ctx, admin, &zero, nil))
+	var lastPost time.Time
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT last_post_at FROM forum_members WHERE user_id=$1`, user).Scan(&lastPost))
+	require.True(t, lastPost.Equal(message.CreatedAt), "recall must not reset rate limiting")
+
+	insert := func(author int64, ageSeconds int) int64 {
+		t.Helper()
+		var id int64
+		require.NoError(t, integrationDB.QueryRowContext(ctx, `INSERT INTO forum_messages(user_id,content,created_at)
+            VALUES($1,'Recall test',clock_timestamp()-make_interval(secs => $2)) RETURNING id`, author, ageSeconds).Scan(&id))
+		return id
+	}
+	expired := insert(user, 60)
+	require.ErrorIs(t, repo.Recall(ctx, user, expired), service.ErrForumRecallExpired)
+	require.NoError(t, repo.Recall(ctx, admin, expired))
+	assertGone(expired)
+	adminMessage := insert(admin, 400*24*60*60)
+	require.NoError(t, repo.Recall(ctx, admin, adminMessage))
+	assertGone(adminMessage)
+	archived := insert(user, 400*24*60*60)
+	require.NoError(t, repo.Pin(ctx, admin, archived, true))
+	require.NoError(t, repo.Cleanup(ctx))
+	require.ErrorIs(t, repo.Recall(ctx, user, archived), service.ErrForumRecallExpired)
+	require.NoError(t, repo.Recall(ctx, admin, archived))
+	assertGone(archived)
+
+	// Neither pinning nor a second recall can resurrect a concurrently recalled message.
+	concurrent := insert(user, 0)
+	var wg sync.WaitGroup
+	results := make(chan error, 2)
+	wg.Add(2)
+	go func() { defer wg.Done(); results <- repo.Pin(ctx, admin, concurrent, true) }()
+	go func() { defer wg.Done(); results <- repo.Recall(ctx, user, concurrent) }()
+	wg.Wait()
+	close(results)
+	for err := range results {
+		if err != nil {
+			require.ErrorIs(t, err, service.ErrForumNotFound)
+		}
+	}
+	assertGone(concurrent)
+	require.ErrorIs(t, repo.Pin(ctx, admin, concurrent, true), service.ErrForumNotFound)
 }
 
 func TestForumArrivalsDeduplicateSessions(t *testing.T) {

@@ -19,7 +19,7 @@
             <button v-if="before" :disabled="loading" @click="latest">{{ t('forum.latest') }}</button>
           </div>
           <p v-if="!page" class="forum-empty-label">{{ t('common.loading') }}</p>
-          <div v-else-if="!page.messages.length" class="forum-empty">
+          <div v-else-if="!chronologicalMessages.length" class="forum-empty">
             <svg viewBox="0 0 180 130" fill="none" aria-hidden="true"><path d="M42 24h90a20 20 0 0 1 20 20v36a20 20 0 0 1-20 20H84l-30 18v-18H42a20 20 0 0 1-20-20V44a20 20 0 0 1 20-20Z" stroke="currentColor" stroke-width="1"/><path d="M58 14h77a28 28 0 0 1 28 28v36M44 49h82M44 65h57" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><circle cx="127" cy="90" r="5" fill="currentColor" /></svg>
             <p>{{ t('forum.empty') }}</p>
           </div>
@@ -40,6 +40,7 @@
                     <button class="forum-action" :disabled="busy" @click="act(() => forumAPI.pin(message.id, !message.pinned))">{{ message.pinned ? t('forum.unpin') : t('forum.pin') }}</button>
                     <button v-if="message.author.user_id && message.author.user_id !== auth.user?.id" class="forum-action" @click="muteTarget = message.author">{{ t('forum.mute') }}</button>
                   </template>
+                  <button v-if="canRecall(message)" class="forum-action" data-recall :disabled="busy" :title="auth.isAdmin ? t('forum.recall') : t('forum.recallHint')" @click="recall(message)">{{ t('forum.recall') }}</button>
                 </div>
               </div>
             </article>
@@ -95,7 +96,7 @@ import ForumAvatar from '@/components/forum/ForumAvatar.vue'
 import ForumAdminBadge from '@/components/forum/ForumAdminBadge.vue'
 import ForumComposer from '@/components/forum/ForumComposer.vue'
 import ForumDrawer from '@/components/forum/ForumDrawer.vue'
-import { forumAPI, type ForumAuthor, type ForumMute, type ForumPage } from '@/api/forum'
+import { forumAPI, type ForumAuthor, type ForumMessage, type ForumMute, type ForumPage } from '@/api/forum'
 import { useAuthStore, useAppStore } from '@/stores'
 import { useForumStore } from '@/stores/forum'
 import { formatCostFixed } from '@/utils/format'
@@ -121,8 +122,9 @@ const muteTarget = ref<ForumAuthor | null>(null)
 const confirmClear = ref(false)
 const managementOpen = ref(false)
 const history = ref<HTMLElement>()
-const chronologicalMessages = computed(() => [...(page.value?.messages || [])].reverse())
+const chronologicalMessages = computed(() => (page.value?.messages || []).filter(message => !forum.recalledIds.has(message.id)).reverse())
 let timer: ReturnType<typeof setInterval>
+let clockTimer: ReturnType<typeof setInterval>
 let stopped = false
 let controller: AbortController | undefined
 const muteUntil = computed(() => {
@@ -131,6 +133,24 @@ const muteUntil = computed(() => {
 })
 const date = (value: string) => new Date(value).toLocaleString(locale.value)
 function showError(error: unknown) { app.showError((error as { message?: string })?.message || t('forum.failed')) }
+function canRecall(message: ForumMessage) {
+  return auth.isAdmin || (message.author.user_id === auth.user?.id && now.value < Date.parse(message.created_at) + 60000)
+}
+async function recall(message: ForumMessage) {
+  now.value = Date.now()
+  if (busy.value || !canRecall(message)) return
+  const userId = auth.user?.id
+  busy.value = true
+  try {
+    await forumAPI.recall(message.id)
+    if (stopped || auth.user?.id !== userId) return
+    forum.removeMessage(message.id)
+    app.showSuccess(t('forum.recalled'))
+    await load()
+  } catch (error) {
+    if (!stopped && auth.user?.id === userId) showError(error)
+  } finally { busy.value = false }
+}
 async function load() {
   if (loading.value || stopped) return
   loading.value = true
@@ -176,8 +196,12 @@ async function mutePerson() {
 async function clearAll() { confirmClear.value = false; await act(() => forumAPI.clear()); before.value = 0; await load() }
 function latest() { before.value = 0; void load() }
 function older() { const last = page.value?.messages.at(-1); if (last) { before.value = last.id; void load() } }
-onMounted(() => { void load(); timer = setInterval(() => { now.value = Date.now(); if (!document.hidden) void load() }, 5000) })
-onBeforeUnmount(() => { stopped = true; clearInterval(timer); controller?.abort() })
+onMounted(() => {
+  void load()
+  clockTimer = setInterval(() => { now.value = Date.now() }, 1000)
+  timer = setInterval(() => { if (!document.hidden) void load() }, 5000)
+})
+onBeforeUnmount(() => { stopped = true; clearInterval(timer); clearInterval(clockTimer); controller?.abort() })
 </script>
 <style scoped>
 .forum-page { --forum-ink: #1e293b; --forum-muted: #64748b; --forum-line: #94a3b824; --forum-accent: #0f766e; display: flex; flex-direction: column; max-width: 1150px; height: calc(100dvh - 130px); min-height: 460px; margin: 0 auto; color: var(--forum-ink); }

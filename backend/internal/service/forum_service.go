@@ -12,10 +12,12 @@ import (
 )
 
 var (
-	ErrForumMuted    = infraerrors.Forbidden("FORUM_MUTED", "当前处于禁言期间")
-	ErrForumTooFast  = infraerrors.TooManyRequests("FORUM_TOO_FAST", "发言过于频繁，请稍后再试")
-	ErrForumAdmin    = infraerrors.Forbidden("FORUM_ADMIN_REQUIRED", "仅管理员可执行此操作")
-	ErrForumNotFound = infraerrors.NotFound("FORUM_NOT_FOUND", "记录不存在")
+	ErrForumMuted           = infraerrors.Forbidden("FORUM_MUTED", "当前处于禁言期间")
+	ErrForumTooFast         = infraerrors.TooManyRequests("FORUM_TOO_FAST", "发言过于频繁，请稍后再试")
+	ErrForumAdmin           = infraerrors.Forbidden("FORUM_ADMIN_REQUIRED", "仅管理员可执行此操作")
+	ErrForumNotFound        = infraerrors.NotFound("FORUM_NOT_FOUND", "记录不存在")
+	ErrForumRecallForbidden = infraerrors.Forbidden("FORUM_RECALL_FORBIDDEN", "只能撤回自己发送的消息")
+	ErrForumRecallExpired   = infraerrors.Forbidden("FORUM_RECALL_EXPIRED", "消息发送已满 1 分钟，无法撤回")
 )
 
 type ForumAuthor struct {
@@ -68,6 +70,7 @@ type ForumRepository interface {
 	Mute(context.Context, int64, int64, int) error
 	Mutes(context.Context, int64) ([]ForumMute, error)
 	Pin(context.Context, int64, int64, bool) error
+	Recall(context.Context, int64, int64) error
 	Clear(context.Context, int64) error
 	Cleanup(context.Context) error
 }
@@ -121,6 +124,9 @@ func (s *ForumService) Pin(ctx context.Context, actor, message int64, pinned boo
 	return s.repo.Pin(ctx, actor, message, pinned)
 }
 func (s *ForumService) Clear(ctx context.Context, actor int64) error { return s.repo.Clear(ctx, actor) }
+func (s *ForumService) Recall(ctx context.Context, actor, message int64) error {
+	return s.repo.Recall(ctx, actor, message)
+}
 
 // 昵称可能由 OAuth 邮箱初始化，公开讨论中保持与排行榜相同的隐私规则。
 func ForumDisplayName(name string) string {

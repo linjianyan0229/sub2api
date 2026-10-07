@@ -38,6 +38,7 @@ func RegisterUserRoutes(
 		forum := authenticated.Group("/forum")
 		forum.GET("", h.Forum.Page)
 		forum.POST("/messages", h.Forum.Create)
+		forum.DELETE("/messages/:id", h.Forum.Recall)
 		forum.GET("/events", h.Forum.Events)
 		forum.POST("/arrival", h.Forum.Arrive)
 

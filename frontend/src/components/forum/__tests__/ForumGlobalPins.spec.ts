@@ -8,8 +8,8 @@ import AppHeader from '@/components/layout/AppHeader.vue'
 
 const auth = reactive({ isAuthenticated: true, isAdmin: false, isSharedQuota: false, user: { id: 1 } as { id: number } | null })
 const route = reactive({ path: '/dashboard', fullPath: '/dashboard', meta: {} })
-const mocks = vi.hoisted(() => ({ pin: vi.fn(), success: vi.fn(), error: vi.fn() }))
-vi.mock('@/api/forum', () => ({ forumAPI: { pin: mocks.pin } }))
+const mocks = vi.hoisted(() => ({ pin: vi.fn(), recall: vi.fn(), success: vi.fn(), error: vi.fn() }))
+vi.mock('@/api/forum', () => ({ forumAPI: { pin: mocks.pin, recall: mocks.recall } }))
 vi.mock('vue-router', () => ({
   RouterView: { template: '<div><AppHeader /><main data-route-page>Page content</main></div>' },
   useRoute: () => route,
@@ -53,6 +53,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.clearAllMocks()
   mocks.pin.mockReset().mockResolvedValue(undefined)
+  mocks.recall.mockReset().mockResolvedValue(undefined)
   setActivePinia(createPinia())
   auth.user = { id: 1 }
   auth.isAuthenticated = true
@@ -90,6 +91,7 @@ describe('Global forum pins', () => {
     await banner.get('.pin-open').trigger('click')
     expect(banner.findAll('[data-pin-detail-id]')).toHaveLength(3)
     expect(banner.find('.pin-unpin').exists()).toBe(false)
+    expect(banner.find('[data-pin-recall]').exists()).toBe(false)
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
     await banner.get('.pin-open').trigger('click')
     expect(banner.find('[data-pin-detail]').exists()).toBe(false)
@@ -136,6 +138,42 @@ describe('Global forum pins', () => {
     expect(mocks.error).toHaveBeenCalledWith('Unpin failed')
     expect(mocks.success).not.toHaveBeenCalled()
     expect(wrapper.get('.pin-unpin').attributes('disabled')).toBeUndefined()
+  })
+  it('lets admins recall archived pins and rejects stale polling snapshots', async () => {
+    auth.isAdmin = true
+    wrapper = render()
+    await flushPromises()
+    const store = useForumStore()
+    store.setPinned(pins)
+    await flushPromises()
+    await wrapper.get('.pin-open').trigger('click')
+    await wrapper.get('[data-pin-detail-id="2"] [data-pin-recall]').trigger('click')
+    await flushPromises()
+    expect(mocks.recall).toHaveBeenCalledWith(2)
+    expect(mocks.pin).not.toHaveBeenCalled()
+    expect(store.recalledIds.has(2)).toBe(true)
+    expect(store.pinned.map(pin => pin.id)).toEqual([1, 3])
+    store.setPinned(pins)
+    await flushPromises()
+    expect(wrapper.find('[data-pin-detail-id="2"]').exists()).toBe(false)
+    expect(mocks.success).toHaveBeenCalledWith('forum.recalled')
+    store.reset()
+    expect(store.recalledIds.size).toBe(0)
+  })
+  it('keeps pins intact when recall fails', async () => {
+    auth.isAdmin = true
+    mocks.recall.mockRejectedValueOnce(new Error('Recall failed'))
+    wrapper = render()
+    await flushPromises()
+    useForumStore().setPinned(pins)
+    await flushPromises()
+    await wrapper.get('.pin-open').trigger('click')
+    await wrapper.get('[data-pin-recall]').trigger('click')
+    await flushPromises()
+    expect(useForumStore().pinned).toEqual(pins)
+    expect(useForumStore().recalledIds.size).toBe(0)
+    expect(mocks.error).toHaveBeenCalledWith('Recall failed')
+    expect(wrapper.get('[data-pin-recall]').attributes('disabled')).toBeUndefined()
   })
   it('does not apply an old unpin response to another account', async () => {
     auth.isAdmin = true

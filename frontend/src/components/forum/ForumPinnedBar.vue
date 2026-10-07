@@ -41,9 +41,10 @@
             <strong>{{ message.author.username || t('leaderboard.anonymous') }}</strong>
             <ForumAdminBadge v-if="message.author.is_admin" />
           </div>
-          <button v-if="manageable" class="pin-unpin" :disabled="busy" @click="emit('unpin', message.id)">
-            {{ t('forum.unpin') }}
-          </button>
+          <div v-if="manageable" class="pin-actions">
+            <button class="pin-unpin" :disabled="busy" @click="emit('unpin', message.id)">{{ t('forum.unpin') }}</button>
+            <button class="pin-recall" data-pin-recall :disabled="busy" @click="emit('recall', message.id)">{{ t('forum.recall') }}</button>
+          </div>
         </div>
         <p class="pin-detail-content">{{ message.content }}</p>
       </article>
@@ -66,7 +67,7 @@ const props = defineProps<{
   busy?: boolean
   compact?: boolean
 }>()
-const emit = defineEmits<{ unpin: [id: number] }>()
+const emit = defineEmits<{ unpin: [id: number]; recall: [id: number] }>()
 const { t } = useI18n()
 const visibility = useDocumentVisibility()
 const root = ref<HTMLElement>()
@@ -128,16 +129,17 @@ button:focus-visible { outline: 2px solid #14b8a6; outline-offset: -3px; }
 .pin-detail + .pin-detail { margin-top: 20px; padding-top: 20px; border-top: 1px solid #94a3b830; }
 .pin-detail-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .pin-detail-author { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 8px; overflow-wrap: anywhere; font-size: 13px; }
+.pin-actions { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; }
 .pin-detail-content { margin-top: 10px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.85; }
-.pin-unpin { flex: none; padding: 4px 8px; border-radius: 8px; color: #0f766e; font-size: 12px; }
-.pin-unpin:hover { background: #14b8a615; }
-.pin-unpin:disabled { opacity: .4; }
+.pin-unpin, .pin-recall { flex: none; padding: 4px 8px; border-radius: 8px; color: #0f766e; font-size: 12px; }
+.pin-unpin:hover, .pin-recall:hover { background: #14b8a615; }
+.pin-unpin:disabled, .pin-recall:disabled { opacity: .4; }
 .pin-slide-enter-active, .pin-slide-leave-active { transition: transform .4s ease, opacity .4s ease; }
 .pin-slide-enter-from { opacity: 0; transform: translateY(100%); }
 .pin-slide-leave-to { opacity: 0; transform: translateY(-100%); }
 .dark .forum-pins { --pin-ink: #5eead4; --pin-muted: #94a3b8; --pin-surface: #102b2c; --pin-border: #2dd4bf26; }
 .dark .pin-content { color: #e2e8f0; }
-.dark .pin-unpin { color: #5eead4; }
+.dark .pin-unpin, .dark .pin-recall { color: #5eead4; }
 .dark .pin-details { background: #102b2c; color: #e2e8f0; border-color: #2dd4bf26; }
 .pins-compact .pin-capsule { height: 36px; gap: 8px; padding-inline: 10px; }
 @media (max-width: 639px) { .pin-capsule { gap: 6px; padding-inline: 10px; } .pins-label > span, .pin-author { display: none; } .pins-compact .pin-capsule { gap: 5px; padding-inline: 8px; } }

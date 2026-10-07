@@ -172,6 +172,21 @@ func (h *ForumHandler) Pin(c *gin.Context) {
 	}
 	response.Success(c, gin.H{"ok": true})
 }
+func (h *ForumHandler) Recall(c *gin.Context) {
+	actor, ok := forumActor(c)
+	if !ok {
+		return
+	}
+	id, ok := forumID(c)
+	if !ok {
+		return
+	}
+	if err := h.service.Recall(c.Request.Context(), actor, id); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"ok": true})
+}
 func (h *ForumHandler) Clear(c *gin.Context) {
 	actor, ok := forumActor(c)
 	if !ok {

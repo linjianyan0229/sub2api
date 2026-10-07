@@ -200,3 +200,106 @@ func TestForumUnpinIndependentCopy(t *testing.T) {
 		})
 	}
 }
+
+func TestForumRecallPermissionsAndAtomicity(t *testing.T) {
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	for _, tt := range []struct {
+		name      string
+		admin     bool
+		author    any
+		age       time.Duration
+		missing   bool
+		pinError  bool
+		chatError bool
+		wantErr   error
+	}{
+		{name: "own_recent_message", author: int64(1)},
+		{name: "just_before_deadline", author: int64(1), age: time.Minute - time.Microsecond},
+		{name: "exact_deadline", author: int64(1), age: time.Minute, wantErr: service.ErrForumRecallExpired},
+		{name: "expired", author: int64(1), age: time.Minute + time.Microsecond, wantErr: service.ErrForumRecallExpired},
+		{name: "another_user", author: int64(2), wantErr: service.ErrForumRecallForbidden},
+		{name: "deleted_author", wantErr: service.ErrForumRecallForbidden},
+		{name: "admin_old_message", admin: true, author: int64(2), age: 400 * 24 * time.Hour},
+		{name: "admin_own_old_message", admin: true, author: int64(1), age: 400 * 24 * time.Hour},
+		{name: "admin_deleted_author", admin: true},
+		{name: "missing_or_already_recalled", author: int64(1), missing: true, wantErr: service.ErrForumNotFound},
+		{name: "pin_delete_failure", author: int64(1), pinError: true},
+		{name: "chat_delete_failure_rolls_back_pin", author: int64(1), chatError: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer db.Close()
+			repo := &forumRepository{db: db}
+			mock.ExpectBegin()
+			// Being muted must not prevent recalling a message.
+			mock.ExpectQuery(regexp.QuoteMeta(`SELECT muted_until FROM forum_settings WHERE id=1 FOR UPDATE`)).
+				WillReturnRows(sqlmock.NewRows([]string{"muted_until"}).AddRow(now.Add(time.Hour)))
+			role := "user"
+			if tt.admin {
+				role = "admin"
+			}
+			mock.ExpectQuery(regexp.QuoteMeta(`SELECT role,status FROM users WHERE id=$1 AND deleted_at IS NULL FOR SHARE`)).
+				WithArgs(int64(1)).WillReturnRows(sqlmock.NewRows([]string{"role", "status"}).AddRow(role, "active"))
+			mock.ExpectQuery(regexp.QuoteMeta(`SELECT clock_timestamp()`)).
+				WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(now))
+			rows := sqlmock.NewRows([]string{"user_id", "created_at"})
+			if !tt.missing {
+				rows.AddRow(tt.author, now.Add(-tt.age))
+			}
+			mock.ExpectQuery(regexp.QuoteMeta(`SELECT user_id,created_at FROM forum_messages WHERE id=$1
+                UNION ALL SELECT user_id,created_at FROM forum_pinned_messages WHERE id=$1 LIMIT 1`)).
+				WithArgs(int64(9)).WillReturnRows(rows)
+			if tt.wantErr == nil {
+				pin := mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM forum_pinned_messages WHERE id=$1`)).WithArgs(int64(9))
+				if tt.pinError {
+					pin.WillReturnError(errors.New("delete failed"))
+				} else {
+					pin.WillReturnResult(sqlmock.NewResult(0, 1))
+					chat := mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM forum_messages WHERE id=$1`)).WithArgs(int64(9))
+					if tt.chatError {
+						chat.WillReturnError(errors.New("delete failed"))
+					} else {
+						chat.WillReturnResult(sqlmock.NewResult(0, 1))
+					}
+				}
+			}
+			if tt.wantErr != nil || tt.pinError || tt.chatError {
+				mock.ExpectRollback()
+			} else {
+				mock.ExpectCommit()
+			}
+			err = repo.Recall(context.Background(), 1, 9)
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+			} else if tt.pinError || tt.chatError {
+				require.ErrorContains(t, err, "delete failed")
+			} else {
+				require.NoError(t, err)
+			}
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestForumRecallRejectsInactiveActors(t *testing.T) {
+	for _, status := range []string{"disabled", "deleted"} {
+		t.Run(status, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer db.Close()
+			mock.ExpectBegin()
+			mock.ExpectQuery("SELECT muted_until FROM forum_settings").
+				WillReturnRows(sqlmock.NewRows([]string{"muted_until"}).AddRow(nil))
+			rows := sqlmock.NewRows([]string{"role", "status"})
+			if status != "deleted" {
+				rows.AddRow("admin", status)
+			}
+			mock.ExpectQuery("SELECT role,status FROM users").WithArgs(int64(1)).WillReturnRows(rows)
+			mock.ExpectRollback()
+			err = (&forumRepository{db: db}).Recall(context.Background(), 1, 9)
+			require.ErrorIs(t, err, service.ErrForumAdmin)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
